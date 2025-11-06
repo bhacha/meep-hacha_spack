@@ -1,4 +1,4 @@
-/* Copyright (C) 2005-2023 Massachusetts Institute of Technology
+/* Copyright (C) 2005-2025 Massachusetts Institute of Technology
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -288,14 +288,16 @@ void greencyl(std::complex<double> *EH, const vec &x, double freq, double eps, d
   /* Perform phi integral.  Since phi integrand is smooth, quadrature with equally spaced points
      should converge exponentially fast with the number N of quadrature points.  We
      repeatedly double N until convergence to tol is achieved, re-using previous points. */
-  const int N0 = 4;
+  const int N0 = 16 + int(4 * abs(m));
   double dphi = 2.0 / N0; // factor of 2*pi*r is already included in add_dft weight
+  double sumabs = 0;      // integral of L1-norm of integrand
   for (int N = N0; N <= 65536; N *= 2) {
     std::complex<double> EH_sum[6];
     dphi *= 0.5; // delta phi is halved because N doubles
     double dphi2pi = dphi * 2 * pi;
     for (int j = 0; j < 6; ++j)
       EH_sum[j] = EH[j] * 0.5; // re-use previous quadrature points (with halved dphi)
+    sumabs *= 0.5;             // re-use previous quadrature (with halved dphi)
     /* N-point quadrature points i = 0..N-1.  After the first iteration (N==N0), we
        only need to sum over odd i, since the even i were summed for the previous N. */
     for (int i = (N > N0); i < N; i += 1 + (N > N0)) {
@@ -306,38 +308,47 @@ void greencyl(std::complex<double> *EH, const vec &x, double freq, double eps, d
         the direction of the source current in the xy plane as well */
       if (d == Z) { // source currents in z direction don't rotate
         green3d(EH_phi, x_3d, freq, eps, mu, x0_phi, c0, f0_exp_imphi);
-        for (int j = 0; j < 6; ++j)
+        for (int j = 0; j < 6; ++j) {
           EH_sum[j] += EH_phi[j];
+          sumabs += abs(EH_phi[j]);
+        }
       }
       else if (d == R) { // r_hat = c x_hat + s y_hat
         green3d(EH_phi, x_3d, freq, eps, mu, x0_phi, cx, f0_exp_imphi * c);
-        for (int j = 0; j < 6; ++j)
+        for (int j = 0; j < 6; ++j) {
           EH_sum[j] += EH_phi[j];
+          sumabs += abs(EH_phi[j]);
+        }
         green3d(EH_phi, x_3d, freq, eps, mu, x0_phi, cy, f0_exp_imphi * s);
-        for (int j = 0; j < 6; ++j)
+        for (int j = 0; j < 6; ++j) {
           EH_sum[j] += EH_phi[j];
+          sumabs += abs(EH_phi[j]);
+        }
       }
       else { // (d == P):  phi_hat = c y_hat - s x_hat
         green3d(EH_phi, x_3d, freq, eps, mu, x0_phi, cx, f0_exp_imphi * (-s));
-        for (int j = 0; j < 6; ++j)
+        for (int j = 0; j < 6; ++j) {
           EH_sum[j] += EH_phi[j];
+          sumabs += abs(EH_phi[j]);
+        }
         green3d(EH_phi, x_3d, freq, eps, mu, x0_phi, cy, f0_exp_imphi * c);
-        for (int j = 0; j < 6; ++j)
+        for (int j = 0; j < 6; ++j) {
           EH_sum[j] += EH_phi[j];
+          sumabs += abs(EH_phi[j]);
+        }
       }
     }
     // accumulate the new and old sums and check how much the integral has changed in L1 norm
-    double sumdiff = 0, sumabs = 0;
+    double sumdiff = 0;
     for (int j = 0; j < 6; ++j) {
       sumdiff += abs(EH[j] - EH_sum[j]);
-      sumabs += abs(EH_sum[j]);
       EH[j] = EH_sum[j];
     }
     if (sumdiff <= sumabs * tol) break; // doubling N changed sum by less than tol
   }
 }
 
-void dft_near2far::farfield_lowlevel(std::complex<double> *EH, const vec &x) {
+void dft_near2far::farfield_lowlevel(std::complex<double> *EH, const vec &x, double greencyl_tol) {
   if (x.dim != D3 && x.dim != D2 && x.dim != Dcyl)
     meep::abort("only 2d or 3d or cylindrical far-field computation is supported");
   greenfunc green = x.dim == D2 ? green2d : green3d;
@@ -373,7 +384,7 @@ void dft_near2far::farfield_lowlevel(std::complex<double> *EH, const vec &x) {
             std::complex<double> cphase = std::polar(1.0, phase);
             if (x.dim == Dcyl)
               greencyl(EH6, x, freq[i], eps, mu, xs, c0, f->dft[Nfreq * idx_dft + i], f->fc->m,
-                       1e-3);
+                       greencyl_tol);
             else
               green(EH6, x, freq[i], eps, mu, xs, c0, f->dft[Nfreq * idx_dft + i]);
             for (int j = 0; j < 6; ++j)
@@ -386,11 +397,11 @@ void dft_near2far::farfield_lowlevel(std::complex<double> *EH, const vec &x) {
   }
 }
 
-std::complex<double> *dft_near2far::farfield(const vec &x) {
+std::complex<double> *dft_near2far::farfield(const vec &x, double greencyl_tol) {
   std::complex<double> *EH, *EH_local;
   const size_t Nfreq = freq.size();
   EH_local = new std::complex<double>[6 * Nfreq];
-  farfield_lowlevel(EH_local, x);
+  farfield_lowlevel(EH_local, x, greencyl_tol);
   EH = new std::complex<double>[6 * Nfreq];
   sum_to_all(EH_local, EH, 6 * Nfreq);
   delete[] EH_local;
@@ -398,7 +409,7 @@ std::complex<double> *dft_near2far::farfield(const vec &x) {
 }
 
 double *dft_near2far::get_farfields_array(const volume &where, int &rank, size_t *dims, size_t &N,
-                                          double resolution) {
+                                          double resolution, double greencyl_tol) {
   /* compute output grid size etc. */
   double dx[3] = {0, 0, 0};
   direction dirs[3] = {X, Y, Z};
@@ -446,7 +457,7 @@ double *dft_near2far::get_farfields_array(const volume &where, int &rank, size_t
           start = t;
           last_point = this_point;
         }
-        farfield_lowlevel(EH1, x);
+        farfield_lowlevel(EH1, x, greencyl_tol);
         if (verbosity > 1) all_wait(); // Allow consistent progress updates from master
         ptrdiff_t idx = (i0 * dims[1] + i1) * dims[2] + i2;
         for (size_t i = 0; i < Nfreq; ++i)
@@ -472,12 +483,12 @@ double *dft_near2far::get_farfields_array(const volume &where, int &rank, size_t
 }
 
 void dft_near2far::save_farfields(const char *fname, const char *prefix, const volume &where,
-                                  double resolution) {
+                                  double resolution, double greencyl_tol) {
   size_t dims[4] = {1, 1, 1, 1};
   int rank = 0;
   size_t N = 1;
 
-  double *EH = get_farfields_array(where, rank, dims, N, resolution);
+  double *EH = get_farfields_array(where, rank, dims, N, resolution, greencyl_tol);
   if (!EH) return; /* nothing to output */
 
   const size_t Nfreq = freq.size();
@@ -644,7 +655,8 @@ dft_near2far fields::add_dft_near2far(const volume_list *where, const double *fr
 // Modified from farfield_lowlevel
 std::vector<struct sourcedata> dft_near2far::near_sourcedata(const vec &x_0, double *farpt_list,
                                                              size_t nfar_pts,
-                                                             const std::complex<double> *dJ) {
+                                                             const std::complex<double> *dJ,
+                                                             double greencyl_tol) {
   if (x_0.dim != D3 && x_0.dim != D2 && x_0.dim != Dcyl)
     meep::abort("only 2d or 3d or cylindrical far-field computation is supported");
   greenfunc green = x_0.dim == D2 ? green2d : green3d;
@@ -686,7 +698,7 @@ std::vector<struct sourcedata> dft_near2far::near_sourcedata(const vec &x_0, dou
             for (size_t ipt = 0; ipt < nfar_pts; ++ipt) {
               vec x = vec(farpt_list[3 * ipt], farpt_list[3 * ipt + 1], farpt_list[3 * ipt + 2]);
               if (x_0.dim == Dcyl)
-                greencyl(EH6, x, freq[i], eps, mu, xs, c0, w, f->fc->m, 1e-3);
+                greencyl(EH6, x, freq[i], eps, mu, xs, c0, w, f->fc->m, greencyl_tol);
               else
                 green(EH6, x, freq[i], eps, mu, xs, c0, w);
               for (int j = 0; j < 6; ++j)

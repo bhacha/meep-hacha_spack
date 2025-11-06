@@ -1,13 +1,13 @@
 # Process this file with autoconf to produce a configure script.
 
-AC_INIT([meep],[m4_esyscmd(./version.sh 1.28.0-beta)])
+AC_INIT([meep],[m4_esyscmd(./version.sh 1.32.0-beta)])
 AC_CONFIG_SRCDIR(src/step.cpp)
 
 # Shared-library version number; indicates api compatibility, and is
 # not the same as the "public" version number.  (Don't worry about this
 # except for public releases.) Note that any change to a C++ class
 # definition (in the .hpp file) generally breaks binary compatibility.
-SHARED_VERSION_INFO="32:0:0" # CURRENT:REVISION:AGE
+SHARED_VERSION_INFO="35:0:0" # CURRENT:REVISION:AGE
 
 AM_INIT_AUTOMAKE([foreign color-tests parallel-tests silent-rules 1.11])
 AM_SILENT_RULES(yes)
@@ -576,7 +576,7 @@ else
     if test $have_python = yes; then
 
       AC_MSG_CHECKING([for Python include directory])
-      pinc=`echo "import distutils.sysconfig; print (distutils.sysconfig.get_python_inc())" | $PYTHON - 2>/dev/null`
+      pinc=`echo "import sysconfig; print(sysconfig.get_path('include'))" | $PYTHON - 2>/dev/null`
       AC_MSG_RESULT([${pinc:-unknown}])
       test -n "$pinc" && PYTHON_INCLUDES="-I$pinc"
       save_CPPFLAGS=$CPPFLAGS

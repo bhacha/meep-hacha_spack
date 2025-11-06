@@ -1,4 +1,4 @@
-/* Copyright (C) 2005-2023 Massachusetts Institute of Technology
+/* Copyright (C) 2005-2025 Massachusetts Institute of Technology
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -47,6 +47,8 @@ typedef hssize_t start_t;
 
 #else
 typedef int hid_t;
+#define H5T_NATIVE_FLOAT 0
+#define H5T_NATIVE_DOUBLE 0
 #endif
 
 #define HID(x) (*((hid_t *)(x)))

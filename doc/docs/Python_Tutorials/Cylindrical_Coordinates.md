@@ -333,15 +333,22 @@ Finally, as reference, the same calculation can be set up in Cartesian coordinat
 Scattering Cross Section of a Finite Dielectric Cylinder
 --------------------------------------------------------
 
-As an alternative to the "ring" sources of the previous examples, it is also possible to launch planewaves in cylindrical coordinates. This is demonstrated in this example which involves computing the scattering cross section of a finite-height dielectric cylinder. The results for the 2d simulation involving the cylindrical ($r$,$z$) cell are validated by comparing to the same simulation in 3d Cartesian ($x$,$y$,$z$) coordinates which tends to be much slower and less accurate at the same grid resolution.
+As an alternative to the "ring" sources of the previous examples, it is also possible to launch planewaves in cylindrical coordinates. This is demonstrated in this example which involves computing the scattering cross section of a finite-height dielectric cylinder. The results for the 2d simulation involving the cylindrical ($r$, $z$) or ($\rho$, $z$) cell are validated by comparing to the same simulation in 3d Cartesian ($x$, $y$, $z$) coordinates which tends to be much slower and less accurate at the same grid resolution.
 
 The calculation of the scattering cross section is described in [Tutorial/Basics/Mie Scattering of a Lossless Dielectric Sphere](Basics.md#mie-scattering-of-a-lossless-dielectric-sphere) which is modified for this example. A linearly-polarized ($x$) planewave is normally incident on a $z$-oriented cylinder which is enclosed by a DFT flux box. Expressed in cylindrical coordinates, an $x$-polarized planewave propagating in the $z$ direction is the sum of two circularly-polarized planewaves of opposite chirality:
 
 $$ \hat{E}_x = \frac{1}{2} \left[e^{i\phi}(\hat{E}_\rho + i\hat{E}_\phi) + e^{-i\phi}(\hat{E}_\rho - i\hat{E}_\phi)\right] $$
 
-(Note: a $y$-polarized planewave involves subtracting rather than adding the two terms above.)
+A $y$-polarized planewave involves subtracting rather than adding the two terms in parentheses:
 
-In practice, this involves performing *two* separate simulations for $m=\pm 1$. The scattered power from each simulation is then simply summed since the cross term in the total Poynting flux cancels for the different $m$ values when integrated over the $\phi$ direction. However, in the case of a material with isotropic permittivity, only one of the two simulations is necessary: the scattered power is the same for $m=\pm 1$ due to the mirror symmetry of the structure. A chiral material based on an anisotropic permittivity with principle axes not aligned with the coordinates axes breaks the mirror symmetry and thus would require two separate simulations. (Note that a linearly-polarized planewave is *not* $m=0$, which corresponds to a field pattern that is *invariant* under rotations similar to [TE<sub>01</sub>/TM<sub>01</sub> modes](https://en.wikipedia.org/wiki/Transverse_mode). A linear polarization is the superposition of left and right circularly-polarized waves ($m=\pm 1$) and is *not* rotationally invariant; it flips sign if it is rotated by 180°.)
+$$ \hat{E}_y = \frac{1}{2} \left[e^{i\phi}(\hat{E}_\rho + i\hat{E}_\phi) - e^{-i\phi}(\hat{E}_\rho - i\hat{E}_\phi)\right] $$
+(Note, however, that for axisymmetric problems the $\hat{E}_y$ solution is merely a 90° rotation of the $\hat{E}_x$ solution.)
+
+In principle, this involves performing *two* separate simulations for $m=\pm 1$. The scattered power from each simulation is then simply summed since the cross term in the total Poynting flux cancels for the different $m$ values when integrated over the $\phi$ direction. As a simplification, in the case of a material with isotropic permittivity (and/or real permittivity), only one of the two simulations is necessary: the scattered power is the same for $m=\pm 1$ due to the mirror (and/or conjugate) symmetry of the structure.
+
+If one has a gyromagnetic material (which breaks mirror symmetry, conjugate symmetry, and reciprocity), then ±m simulations are generally inequivalent and one may require two separate simulations. For a given linearly-polarized planewave, the solution is computed by combining the fields from the two current sources of opposite chirality in separate runs (and subsequently computing Poynting flux or other desired quantities).
+
+Note that a linearly-polarized planewave is *not* $m=0$, which corresponds to a field pattern that is *invariant* under rotations similar to [TE<sub>01</sub>/TM<sub>01</sub> modes](https://en.wikipedia.org/wiki/Transverse_mode). A linear polarization is the superposition of left and right circularly-polarized waves ($m=\pm 1$) and is *not* rotationally invariant; it flips sign if it is rotated by 180°.
 
 The simulation script is in [examples/cylinder_cross_section.py](https://github.com/NanoComp/meep/blob/master/python/examples/cylinder_cross_section.py). The notebook is [examples/cylinder_cross_section.ipynb](https://nbviewer.jupyter.org/github/NanoComp/meep/blob/master/python/examples/cylinder_cross_section.ipynb).
 
@@ -455,13 +462,171 @@ As shown below, the results for the scattering cross section computed using cyli
 ![](../images/cylinder_cross_section.png#center)
 
 
+Scattering of Sphere with Oblique Planewave
+-------------------------------------------
+
+It is also possible to launch an oblique incident planewave in cylindrical coordinate by decomposing the planewave $A_xe^{ik_xx+ik_yy}\hat{x} + A_ye^{ik_xx+ik_yy}\hat{y}$ into $\sum_m (J_r(r, m)\hat{r} + J_\phi(r, m)\hat{\phi})e^{im\phi}$ through [Jacobi-Anger expansion](https://en.wikipedia.org/wiki/Jacobi%E2%80%93Anger_expansion). The exact expressions of $J_r(r,m)$ and $J_\phi(r,m)$ are given [here](http://github.com/zlin-opt/axisym_meta3d_inverse_design/blob/master/Implementation_of_FDFD_with_Cylindrical_Coordinates.pdf) by Zin Lin. In the simplest case of normal incidence, $J_r(r,m)$ and $J_\phi(r,m)$ are nonzero only when $m = \pm 1$, as shown in the [previous tutorial](https://meep.readthedocs.io/en/latest/Python_Tutorials/Cylindrical_Coordinates/#scattering-cross-section-of-a-finite-dielectric-cylinder).
+
+Given the decomposition of planewave into the sum of different current sources at each $m$, we can run individual simulations at each $m$ with their corresponding source amplitudes and record the relevant physical quantities. For some quantities such as fields, linearity implies that we can simply sum the results from each simulations; for some other quantities such as flux, orthogonality implies cross terms will be zero, and we can again simply sum the results. Moreover, simulations
+at each $m$ values are embarrassingly parallel so they can be run simultaneously.
+
+We present an example below that calculates the scattered flux of a sphere. Because of the spherical symmetry, incidence at different angle should have identical results. We can thus use this feature to check our approach. Note that because of the axial symmetry in the cylindrical coordinates, we cannot distinguish different azimuthal angles but we can distinguish different polar angles. We thus simply choose our incidence to be of form $E_ye^{ik_xx}$, and we can vary the angle of incidence by varying $k_x$.
+
+On the other hand, because the source amplitudes $J_r(r,m)$ and $J_\phi(r,m)$ are generally not constant and extend to infinity, we used the principle of equivalence (for reference, see [Electromagnetic wave source condition](https://arxiv.org/pdf/1301.5366.pdf)) to create equivalent sources that are of finite sizes. Specifically, with the chosen incidence, the E fields in space are $E_ye^{ik_xx+ik_zz}$, and thus H fields can be computed by taking the curl; then Jacobi-Anger expansion can express the dependencies in $x$ and $y$ in terms of $m$ and $r$; afterwards, we created a box of sources surrounding the geometry and specify sources of amplitude $J = n \times H$ and $K = - n \times E$.
+
+Empirically, we found that the Courant factor has to scale as $1/(|m|+0.5)$ in cylindrical coordinate to maintain numerical stability. By default, Meep uses the same Courant factor but instead zeros out fields near axis for $|m| > 1 $. In this tutorial, we choose to scale the Courant factor accordingly and force Meep to use the actual fields near axis via `accurate_fields_near_cylorigin=True`.
+
+```py
+import numpy as np
+from scipy import special
+import meep as mp
+mp.verbosity(0)
+r = 0.6  # size of flux box
+cyl_r = 0.5 # radius of sphere
+h = 2 * r  # height/diameter of sphere
+
+wvl = 2 * np.pi * cyl_r / 4
+frq_cen = 1 / wvl
+dfrq = 0.2
+nfrq = 1
+resolution, mrange = 50, 5
+dpml = 0.5 * wvl
+dair = 1.0 * wvl
+pml_layers = [mp.PML(thickness=dpml)]
+sr = r + dair + dpml
+sz = dpml + dair + h + dair + dpml
+cell_size = mp.Vector3(sr, 0, sz)
+n_cyl = 2.0
+geometry = [mp.Sphere(material=mp.Medium(index=n_cyl), center=mp.Vector3(), radius=cyl_r)]
+
+k_cen = 2 * np.pi * frq_cen
+alpha_list = [0, np.pi/36, np.pi/24, np.pi/18, np.pi/12]
+alpha_range = len(alpha_list)
+
+
+src_size_tb = 2*r
+src_size_side = 3*r
+src_center_top = mp.Vector3(src_size_tb/2, 0, src_size_side/2)
+src_center_bottom = mp.Vector3(src_size_tb/2, 0, -src_size_side/2)
+src_center_side = mp.Vector3(src_size_tb, 0, 0)
+
+scatt_flux_m = np.zeros((alpha_range, mrange+1))
+for alpha_i in range(alpha_range):
+    alpha = alpha_list[alpha_i]
+    kxy, kz = k_cen*np.sin(alpha), k_cen * np.cos(alpha)
+    amp_side = lambda v3: np.exp(1j * kz*(v3.z+src_size_side/2))
+    phase_top = amp_side(src_center_top)
+
+    for cur_m in range(0, mrange+1):
+        if alpha!=0 or cur_m == 1:
+            coeff_p1 = 0.5 * (1j)**(cur_m+1)
+            coeff_m1 = 0.5 * (1j)**(cur_m-1)
+
+            src_cen = src_size_tb/2
+            Jpm = lambda v3: coeff_p1 * special.jv(cur_m+1, kxy * (v3.x+src_cen)) + coeff_m1 * special.jv(cur_m-1, kxy * (v3.x+src_cen))
+            Jrm = lambda v3: 1j * coeff_p1 * special.jv(cur_m+1, kxy * (v3.x+src_cen)) - 1j * coeff_m1 * special.jv(cur_m-1, kxy * (v3.x+src_cen))
+            Jside = (1j)**cur_m * special.jv(cur_m, kxy*src_size_tb) * kxy/k_cen
+
+            src_t  = mp.GaussianSource(frq_cen, fwidth=dfrq)
+            sourcesp = [
+                mp.Source(src_t,component=mp.Er, center=src_center_bottom,size=mp.Vector3(src_size_tb), amplitude = -kz/k_cen, amp_func = Jrm),
+                mp.Source(src_t,component=mp.Ep, center=src_center_bottom,size=mp.Vector3(src_size_tb), amplitude = -kz/k_cen, amp_func = Jpm),
+                mp.Source(src_t,component=mp.Hr, center=src_center_bottom,size=mp.Vector3(src_size_tb), amp_func = Jpm),
+                mp.Source(src_t,component=mp.Hp, center=src_center_bottom,size=mp.Vector3(src_size_tb), amplitude = -1, amp_func = Jrm),
+                mp.Source(src_t,component=mp.Er, center=src_center_top,size=mp.Vector3(src_size_tb), amplitude = phase_top*kz/k_cen, amp_func = Jrm),
+                mp.Source(src_t,component=mp.Ep, center=src_center_top,size=mp.Vector3(src_size_tb), amplitude = phase_top*kz/k_cen, amp_func = Jpm),
+                mp.Source(src_t,component=mp.Hr, center=src_center_top,size=mp.Vector3(src_size_tb), amplitude = -phase_top, amp_func = Jpm),
+                mp.Source(src_t,component=mp.Hp, center=src_center_top,size=mp.Vector3(src_size_tb), amplitude = phase_top, amp_func = Jrm),
+                mp.Source(src_t,component=mp.Ez, center=src_center_side,size=mp.Vector3(z=src_size_side), amplitude = -Jrm(src_center_top)*kz/k_cen, amp_func = amp_side),
+                mp.Source(src_t,component=mp.Hz, center=src_center_side,size=mp.Vector3(z=src_size_side), amplitude = Jpm(src_center_top), amp_func = amp_side),
+                mp.Source(src_t,component=mp.Ep, center=src_center_side,size=mp.Vector3(z=src_size_side), amplitude = Jside, amp_func = amp_side),
+            ]
+
+
+            sim = mp.Simulation(
+                cell_size=cell_size,
+                boundary_layers=pml_layers,
+                resolution=resolution,
+                sources=sourcesp,
+                dimensions=mp.CYLINDRICAL,
+                m=cur_m,
+                force_complex_fields = True,
+                accurate_fields_near_cylorigin=True,
+                Courant=min(0.5, 1/(abs(cur_m)+0.5)))
+
+            box_z1 = sim.add_flux(frq_cen, dfrq, nfrq,
+                mp.FluxRegion(center=mp.Vector3(0.5 * r, 0, -0.5 * h), size=mp.Vector3(r)))
+            box_z2 = sim.add_flux(frq_cen, dfrq, nfrq,
+                mp.FluxRegion(center=mp.Vector3(0.5 * r, 0, +0.5 * h), size=mp.Vector3(r)))
+            box_r = sim.add_flux(frq_cen, dfrq, nfrq,
+                mp.FluxRegion(center=mp.Vector3(r), size=mp.Vector3(z=h)))
+
+
+            sim.run(until_after_sources=10)
+
+            freqs = mp.get_flux_freqs(box_z1)
+            box_z1_data = sim.get_flux_data(box_z1)
+            box_z2_data = sim.get_flux_data(box_z2)
+            box_r_data = sim.get_flux_data(box_r)
+            box_z1_flux0 = mp.get_fluxes(box_z1)
+
+
+            sim.reset_meep()
+
+            sim = mp.Simulation(
+                cell_size=cell_size,
+                geometry=geometry,
+                boundary_layers=pml_layers,
+                resolution=resolution,
+                sources=sourcesp,
+                dimensions=mp.CYLINDRICAL,
+                m=cur_m,
+                force_complex_fields = True,
+                accurate_fields_near_cylorigin=True,
+                Courant=min(0.5, 1/(abs(cur_m)+0.5)))
+
+            box_z1 = sim.add_flux(frq_cen, dfrq, nfrq,
+                mp.FluxRegion(center=mp.Vector3(0.5 * r, 0, -0.5 * h), size=mp.Vector3(r)))
+            box_z2 = sim.add_flux(frq_cen, dfrq, nfrq,
+                mp.FluxRegion(center=mp.Vector3(0.5 * r, 0, +0.5 * h), size=mp.Vector3(r)))
+            box_r = sim.add_flux(frq_cen, dfrq, nfrq,
+                mp.FluxRegion(center=mp.Vector3(r), size=mp.Vector3(z=h)))
+
+
+            sim.load_minus_flux_data(box_z1, box_z1_data)
+            sim.load_minus_flux_data(box_z2, box_z2_data)
+            sim.load_minus_flux_data(box_r, box_r_data)
+
+
+            sim.run(until_after_sources=100)
+
+            box_z1_flux = mp.get_fluxes(box_z1)
+            box_z2_flux = mp.get_fluxes(box_z2)
+            box_r_flux = mp.get_fluxes(box_r)
+
+            scatt_flux_m[alpha_i, cur_m] = box_z1_flux[0] - box_z2_flux[0] - box_r_flux[0]
+            sim.reset_meep()
+
+scatt_power_m = np.zeros((alpha_range, mrange+1))
+for i in range(mrange+1):
+    scatt_power_m[:,i] = - 2*np.sum(scatt_flux_m[:,0:(i+1)], axis=1) + scatt_flux_m[:,0]
+
+print(scatt_power_m)
+
+```
+
+The resulting `scatt_power_m` array is a table where each row `scatt_power_m[j,:]` corresponds to one angle, and
+the columns `scatt_power_m[j,M]` is the sum of power contributions for `|m| ≤ M`.  For `M` sufficiently large,
+these sums approach the same value, because the scattering from a sphere is angle independent.  For `M=5` there are slight (≈2%)
+discrepancies between angles due to primarily discretization errors (doubling the resolution more than halves this
+error).
 
 Focusing Properties of a Binary-Phase Zone Plate
 ------------------------------------------------
 
 It is also possible to compute a [near-to-far field transformation](../Python_User_Interface.md#near-to-far-field-spectra) in cylindrical coordinates. This is demonstrated in this example for a binary-phase [zone plate](https://en.wikipedia.org/wiki/Zone_plate) which is a rotationally-symmetric diffractive lens used to focus a normally-incident planewave to a single spot.
 
-Using [scalar theory](http://zoneplate.lbl.gov/theory), the radius of the $n$<sup>th</sup> zone can be computed as:
+Using [scalar theory](https://en.wikipedia.org/wiki/Zone_plate#Design_and_manufacture), the radius of the $n$<sup>th</sup> zone can be computed as:
 
 $$ r_n^2 = n\lambda (f+\frac{n\lambda}{4})$$
 
@@ -474,110 +639,215 @@ where $n$ is the zone index (1,2,3,...,$N$), $f$ is the focal length, and $\lamb
 The simulation script is in [examples/zone_plate.py](https://github.com/NanoComp/meep/blob/master/python/examples/zone_plate.py). The notebook is [examples/zone_plate.ipynb](https://nbviewer.jupyter.org/github/NanoComp/meep/blob/master/python/examples/zone_plate.ipynb).
 
 ```py
+import math
+
+import matplotlib.pyplot as plt
 import meep as mp
 import numpy as np
-import math
-import matplotlib.pyplot as plt
 
-resolution = 25             # pixels/μm
 
-dpml = 1.0                  # PML thickness
-dsub = 2.0                  # substrate thickness
-dpad = 2.0                  # padding betweeen zone plate and PML
-zh = 0.5                    # zone-plate height
-zN = 25                     # number of zones (odd zones: π phase shift, even zones: none)
-focal_length = 200          # focal length of zone plate
-spot_length = 100           # far-field line length
-ff_res = 10                 # far-field resolution
+resolution_um = 25
 
-pml_layers = [mp.PML(thickness=dpml)]
+pml_um = 1.0
+substrate_um = 2.0
+padding_um = 2.0
+height_um = 0.5
+focal_length_um = 200
+scan_length_z_um = 100
+farfield_resolution_um = 10
 
-wvl_cen = 0.5
-frq_cen = 1/wvl_cen
-dfrq = 0.2*frq_cen
+pml_layers = [mp.PML(thickness=pml_um)]
 
-## radii of zones
-## ref: eq. 7 of http://zoneplate.lbl.gov/theory
-r = [math.sqrt(n*wvl_cen*(focal_length+n*wvl_cen/4)) for n in range(1,zN+1)]
+wavelength_um = 0.5
+frequency = 1 / wavelength_um
+frequench_width = 0.2 * frequency
 
-sr = r[-1]+dpad+dpml
-sz = dpml+dsub+zh+dpad+dpml
-cell_size = mp.Vector3(sr,0,sz)
+# The number of zones in the zone plate.
+# Odd-numbered zones impart a π phase shift and
+# even-numbered zones impart no phase shift.
+num_zones = 25
 
-sources = [mp.Source(mp.GaussianSource(frq_cen,fwidth=dfrq,is_integrated=True),
-                     component=mp.Er,
-                     center=mp.Vector3(0.5*sr,0,-0.5*sz+dpml),
-                     size=mp.Vector3(sr)),
-           mp.Source(mp.GaussianSource(frq_cen,fwidth=dfrq,is_integrated=True),
-                     component=mp.Ep,
-                     center=mp.Vector3(0.5*sr,0,-0.5*sz+dpml),
-                     size=mp.Vector3(sr),
-                     amplitude=-1j)]
+# Specify the radius of each zone using the equation
+# from https://en.wikipedia.org/wiki/Zone_plate.
+zone_radius_um = np.zeros(num_zones)
+for n in range(1, num_zones + 1):
+    zone_radius_um[n-1] = math.sqrt(
+        n * wavelength_um *
+        (focal_length_um + n * wavelength_um / 4)
+    )
+
+size_r_um = zone_radius_um[-1] + padding_um + pml_um
+size_z_um = pml_um + substrate_um + height_um + padding_um + pml_um
+cell_size = mp.Vector3(size_r_um, 0, size_z_um)
+
+# Specify a (linearly polarized) planewave at normal incidence.
+sources = [
+    mp.Source(
+        mp.GaussianSource(
+            frequency,
+            fwidth=frequench_width,
+            is_integrated=True
+        ),
+        component=mp.Er,
+        center=mp.Vector3(0.5 * size_r_um, 0, -0.5 * size_z_um + pml_um),
+        size=mp.Vector3(size_r_um),
+    ),
+    mp.Source(
+        mp.GaussianSource(
+            frequency,
+            fwidth=frequench_width,
+            is_integrated=True
+        ),
+        component=mp.Ep,
+        center=mp.Vector3(0.5 * size_r_um, 0, -0.5 * size_z_um + pml_um),
+        size=mp.Vector3(size_r_um),
+        amplitude=-1j,
+    ),
+]
 
 glass = mp.Medium(index=1.5)
 
-geometry = [mp.Block(material=glass,
-                     size=mp.Vector3(sr,0,dpml+dsub),
-                     center=mp.Vector3(0.5*sr,0,-0.5*sz+0.5*(dpml+dsub)))]
+# Add the substrate.
+geometry = [
+    mp.Block(
+        material=glass,
+        size=mp.Vector3(size_r_um, 0, pml_um + substrate_um),
+        center=mp.Vector3(
+            0.5 * size_r_um,
+            0,
+            -0.5 * size_z_um + 0.5 * (pml_um + substrate_um)
+        ),
+    )
+]
 
-for n in range(zN-1,-1,-1):
-    geometry.append(mp.Block(material=glass if n % 2 == 0 else mp.vacuum,
-                             size=mp.Vector3(r[n],0,zh),
-                             center=mp.Vector3(0.5*r[n],0,-0.5*sz+dpml+dsub+0.5*zh)))
+# Add the zone plates starting with the ones with largest radius.
+for n in range(num_zones - 1, -1, -1):
+    geometry.append(
+        mp.Block(
+            material=glass if n % 2 == 0 else mp.vacuum,
+            size=mp.Vector3(zone_radius_um[n], 0, height_um),
+            center=mp.Vector3(
+                0.5 * zone_radius_um[n],
+                0,
+                -0.5 * size_z_um + pml_um + substrate_um + 0.5 * height_um
+            ),
+        )
+    )
 
-sim = mp.Simulation(cell_size=cell_size,
-                    boundary_layers=pml_layers,
-                    resolution=resolution,
-                    sources=sources,
-                    geometry=geometry,
-                    dimensions=mp.CYLINDRICAL,
-                    m=-1)
+sim = mp.Simulation(
+    cell_size=cell_size,
+    boundary_layers=pml_layers,
+    resolution=resolution_um,
+    sources=sources,
+    geometry=geometry,
+    dimensions=mp.CYLINDRICAL,
+    m=-1,
+)
 
-## near-field monitor
-n2f_obj = sim.add_near2far(frq_cen,
-                           0,
-                           1,
-                           mp.Near2FarRegion(center=mp.Vector3(0.5*(sr-dpml),0,0.5*sz-dpml),
-                                             size=mp.Vector3(sr-dpml)),
-                           mp.Near2FarRegion(center=mp.Vector3(sr-dpml,0,0.5*sz-dpml-0.5*(dsub+zh+dpad)),
-                                             size=mp.Vector3(z=dsub+zh+dpad)))
+# Add the near-field monitor (must be entirely in air).
+n2f_monitor = sim.add_near2far(
+    frequency,
+    0,
+    1,
+    mp.Near2FarRegion(
+        center=mp.Vector3(
+            0.5 * (size_r_um - pml_um),
+            0,
+            0.5 * size_z_um - pml_um
+        ),
+        size=mp.Vector3(size_r_um - pml_um, 0, 0),
+    ),
+    mp.Near2FarRegion(
+        center=mp.Vector3(
+            size_r_um - pml_um,
+            0,
+            0.5 * size_z_um - pml_um - 0.5 * (height_um + padding_um)
+        ),
+        size=mp.Vector3(0, 0, height_um + padding_um),
+    ),
+)
 
-sim.plot2D()
+fig, ax = plt.subplots()
+sim.plot2D(ax=ax)
 if mp.am_master():
-    plt.savefig("zone_plate_epsilon.png",bbox_inches='tight',dpi=150)
+    fig.savefig("zone_plate_layout.png", bbox_inches="tight", dpi=150)
 
-sim.run(until_after_sources=100)
+# Timestep the fields until they have sufficiently decayed away.
+sim.run(
+    until_after_sources=mp.stop_when_fields_decayed(
+        50.0,
+        mp.Er,
+        mp.Vector3(0.5 * size_r_um, 0, 0),
+        1e-6
+    )
+)
 
-ff_r = sim.get_farfields(n2f_obj,
-                         ff_res,
-                         center=mp.Vector3(0.5*(sr-dpml),0,-0.5*sz+dpml+dsub+zh+focal_length),
-                         size=mp.Vector3(sr-dpml))
+farfields_r = sim.get_farfields(
+    n2f_monitor,
+    farfield_resolution_um,
+    center=mp.Vector3(
+        0.5 * (size_r_um - pml_um),
+        0,
+        -0.5 * size_z_um + pml_um + substrate_um + height_um + focal_length_um
+    ),
+    size=mp.Vector3(size_r_um - pml_um, 0, 0),
+)
 
-ff_z = sim.get_farfields(n2f_obj,
-                         ff_res,
-                         center=mp.Vector3(z=-0.5*sz+dpml+dsub+zh+focal_length),
-                         size=mp.Vector3(z=spot_length))
+farfields_z = sim.get_farfields(
+    n2f_monitor,
+    farfield_resolution_um,
+    center=mp.Vector3(
+        0,
+        0,
+        -0.5 * size_z_um + pml_um + substrate_um + height_um + focal_length_um
+    ),
+    size=mp.Vector3(0, 0, scan_length_z_um),
+)
 
-E2_r = np.absolute(ff_r['Ex'])**2+np.absolute(ff_r['Ey'])**2+np.absolute(ff_r['Ez'])**2
-E2_z = np.absolute(ff_z['Ex'])**2+np.absolute(ff_z['Ey'])**2+np.absolute(ff_z['Ez'])**2
+intensity_r = (
+    np.absolute(farfields_r["Ex"]) ** 2
+    + np.absolute(farfields_r["Ey"]) ** 2
+    + np.absolute(farfields_r["Ez"]) ** 2
+)
+intensity_z = (
+    np.absolute(farfields_z["Ex"]) ** 2
+    + np.absolute(farfields_z["Ey"]) ** 2
+    + np.absolute(farfields_z["Ez"]) ** 2
+)
+
+# Plot the intensity data and save the result to disk.
+fig, ax = plt.subplots(ncols=2)
+
+ax[0].semilogy(
+    np.linspace(0, size_r_um - pml_um, intensity_r.size),
+    intensity_r,
+    "bo-"
+)
+ax[0].set_xlim(-2, 20)
+ax[0].set_xticks(np.arange(0, 25, 5))
+ax[0].grid(True, axis="y", which="both", ls="-")
+ax[0].set_xlabel(r"$r$ coordinate (μm)")
+ax[0].set_ylabel(r"energy density of far fields, |E|$^2$")
+
+ax[1].semilogy(
+    np.linspace(
+        focal_length_um - 0.5 * scan_length_z_um,
+        focal_length_um + 0.5 * scan_length_z_um,
+        intensity_z.size,
+    ),
+    intensity_z,
+    "bo-",
+)
+ax[1].grid(True, axis="y", which="both", ls="-")
+ax[1].set_xlabel(r"$z$ coordinate (μm)")
+ax[1].set_ylabel(r"energy density of far fields, |E|$^2$")
+
+fig.suptitle(
+    f"binary-phase zone plate with focal length $z$ = {focal_length_um} μm"
+)
 
 if mp.am_master():
-    plt.figure(dpi=200)
-    plt.subplot(1,2,1)
-    plt.semilogy(np.linspace(0,sr-dpml,len(E2_r)),E2_r,'bo-')
-    plt.xlim(-2,20)
-    plt.xticks([t for t in np.arange(0,25,5)])
-    plt.grid(True,axis="y",which="both",ls="-")
-    plt.xlabel(r'$r$ coordinate (μm)')
-    plt.ylabel(r'energy density of far fields, |E|$^2$')
-    plt.subplot(1,2,2)
-    plt.semilogy(np.linspace(focal_length-0.5*spot_length,focal_length+0.5*spot_length,len(E2_z)),E2_z,'bo-')
-    plt.grid(True,axis="y",which="both",ls="-")
-    plt.xlabel(r'$z$ coordinate (μm)')
-    plt.ylabel(r'energy density of far fields, |E|$^2$')
-    plt.suptitle(r"Binary-Phase Zone Plate with Focal Length $z$ = {} μm".format(focal_length))
-    plt.tight_layout()
-    plt.savefig("zone_plate_farfields.png")
+    fig.savefig("zone_plate_farfields.png", dpi=200, bbox_inches="tight")
 ```
 
 Note that the volume specified in `get_farfields` via `center` and `size` is in cylindrical coordinates. These points must therefore lie in the $\phi = 0$ ($rz = xz$) plane. The fields $E$ and $H$ returned by `get_farfields` can be thought of as either cylindrical ($r$,$\phi$,$z$) or Cartesian ($x$,$y$,$z$) coordinates since these are the same in the $\phi = 0$ plane (i.e., $E_r=E_x$ and $E_\phi=E_y$). Also, `get_farfields` tends to gradually *slow down* as the far-field point gets closer to the near-field monitor. This performance degradation is unavoidable and is due to the larger number of $\phi$ integration points required for accurate convergence of the integral involving the Green's function which diverges as the evaluation point approaches the source point.
@@ -597,7 +867,7 @@ A point-dipole source at $r_0 > 0$ can be represented as a Dirac delta function 
 
 Simulating a point-dipole source involves two parts: (1) perform a series of simulations for $m = 0, 1, 2, ..., M$ for some cutoff $M$ of the Fourier-series expansion (the solutions for $\pm m$ are simply complex conjugates), and (2) because of power orthogonality, sum the results from each $m$-simulation in post processing, where the $m > 0$ terms are multiplied by two to account for the $-m$ solutions. This procedure is described in more detail below.
 
-Physically, the *total* field $E(x,y,z)$ is a sum of $E_m(r,z)e^{im\phi}$ terms, one for the solution at each $m$ (similarly for $H$). Computing the total Poynting flux, however, involves integrating $\Re [E \times H^*]$ over a surface that includes an integral over $\phi$ in the range $[0,2\pi]$. The key point is that the cross terms $E_mH^*_ne^{i(m-n)\phi}$ integrate to zero due to Fourier orthogonality. **The total Poynting flux is therefore a sum of the Poynting fluxes calculated separately for each $m$.**
+Physically, the *total* field $E(x,y,z)$ is a sum of $E_m(r,z)e^{im\phi}$ terms, one for the solution at each $m$ (similarly for $H$). Computing the total Poynting flux, however, involves integrating $\Re [E \times H^*]$ over a surface that includes an integral over $\phi$ in the range $[0,2\pi]$. (Summing the powers of a single dipole over all $\phi$ is equivalent to summing the powers of an incoherent ensemble of dipoles distributed uniformly in $\phi$: for an incoherent ensemble, you add powers since interference terms cancel, and each dipole location produces the same field up to a rotation.  The radiation pattern from such an incoherent ensemble is axisymmetric.) The key point is that the cross terms $E_mH^*_ne^{i(m-n)\phi}$ integrate to zero due to Fourier orthogonality. **The total Poynting flux is therefore a sum of the Poynting fluxes calculated separately for each $m$.**
 
 A note regarding the source polarization at $r > 0$. The $\hat{x}$ polarization in 3d (the "in-plane" polarization) corresponds to the $\hat{r}$ polarization in cylindrical coordinates. An $\hat{r}$-polarized point-dipole source involves $\hat{r}$-polarized point sources in the $m$-simulations. Even though $\hat{r}$ is in fact $\phi$-dependent, $\hat{r}$ is only evaluated at $\phi = 0$ because of $\delta(\phi)$. $\hat{r}$ is therefore equivalent to $\hat{x}$. This property does not hold for an $\hat{x}$-polarized point source at $r = 0$ (where $\delta(\phi)$ is replaced by $1/2\pi$): in that case, we write $\hat{x} = \hat{r}\cos(\phi) - \hat{\phi}\sin(\phi)$, and the $\sin$ and $\cos$ terms yield simulations for $m = \pm 1$. See also [Tutorial/Scattering Cross Section of a Finite Dielectric Cylinder](#scattering-cross-section-of-a-finite-dielectric-cylinder) which demonstrates setting up a linearly polarized planewave using a similar approach. However, in practice, a single $\hat{r}$-polarized point source at $r = 0$ is necessary for $m = \pm 1$, because that gives a circularly polarized source that emits the same power as a linearly polarized source.
 
@@ -608,6 +878,8 @@ Two features of this method may provide a significant speedup compared to an ide
 2. Each $m$-simulation in the Fourier-series expansion is independent of the others. The simulations can therefore be executed simultaneously using an [embarrassingly parallel](https://meep.readthedocs.io/en/latest/Parallel_Meep/#different-forms-of-parallelization) approach.
 
 ![](../images/cyl_nonaxisymmetric_source_flux_vs_m.png#center)
+
+Note: in a simulation with $m = 0$, the real and imaginary parts of the fields are decoupled. As a runtime optimization, Meep simulates only the *real* part of the fields for this case which roughly halves the number of floating-point operations during timestepping. However, using purely real fields effectively *halves* the current source. Combining the results of the different $m$-simulations correctly using the Fourier-series expansion of the fields requires either setting `force_complex_fields=True` or multiplying the power from the `m = 0` run by four. This tutorial uses the former approach since the cost for using complex fields for only a single run among many is usually insignificant.
 
 As a demonstration, we compute the [extraction efficiency of an LED](https://meep.readthedocs.io/en/latest/Python_Tutorials/Local_Density_of_States/#extraction-efficiency-of-a-light-emitting-diode-led) from a point dipole at $r = 0$ and three different locations at $r > 0$. The test involves verifying that the extraction efficiency is independent of the dipole location. The results are compared to an [identical calculation in 3d](https://github.com/NanoComp/meep/blob/1fe38999997f1825054fc978e473327c77169671/python/examples/extraction_eff_ldos.py#L100-L187) for which the extraction efficiency is 0.333718.
 
@@ -622,20 +894,21 @@ Results are shown in the table below. At this resolution, the relative error is 
 
 The extraction efficiency computed thus far is for *all* angles. To compute the extraction efficiency within an angular cone (i.e., as part of an overall calculation of the [radiation pattern](Near_to_Far_Field_Spectra.md#radiation-pattern-of-an-antenna)), we would need to surround the emitting structure with a closed box of near-field monitors. However, because the LED slab is infinitely extended a non-closed box must be used.  This will introduce [truncation errors](Near_to_Far_Field_Spectra.md#truncation-errors-from-a-non-closed-near-field-surface) which are unavoidable.
 
-In principle, computing extraction efficiency first involves computing the radiation pattern $P(\theta, \phi)$ (the power as a function of [spherical angles](https://en.wikipedia.org/wiki/Spherical_coordinate_system)), and then computing the fraction of this power (integrated over the azimuthal angle $\phi$) that lies within a given angular cone $\theta \in [0,\theta_0]$.   It turns out that there is a simplification because we can compute the azimuthal $P(\theta) = \int P(\theta, \phi) d\phi$ more efficiently without first computing $P(\theta, \phi)$.   However, it is instructive to explain how to compute both $P(\theta, \phi)$ and the extraction efficiency.
+In principle, computing extraction efficiency first involves computing the radiation pattern $P(\theta, \phi)$ (the power as a function of [spherical angles](https://en.wikipedia.org/wiki/Spherical_coordinate_system)), and then computing the fraction of this power (integrated over the azimuthal angle $\phi$) that lies within a given angular cone $\theta \in [0,\theta_0]$.   By convention, $\theta = 0$ is in the $+z$ direction (the "pole") and $\theta = \pi / 2$ is $+r$ (the "equator"). It turns out that there is a simplification because we can compute the azimuthal $P(\theta) = \int P(\theta, \phi) d\phi$ more efficiently without first computing $P(\theta, \phi)$.   However, it is instructive to explain how to compute both $P(\theta, \phi)$ and the extraction efficiency.
 
 To compute the radiation pattern $P(\theta, \phi)$ requires three steps:
 
-1. For each simulation in the Fourier-series expansion ($m = 0, 1, ..., M$), compute the far fields $\vec{E}_m$, $\vec{H}_m$ for the desired $\theta$ points in the $rz$ ($\phi = 0$) plane, at an "infinite" radius (i.e., $R \gg \lambda$) using a [near-to-far field transformation](../Python_User_Interface.md#near-to-far-field-spectra).
-2. Obtain the *total* far fields at these points, for a given $\phi$ by summing the far fields from (1): $\vec{E}_{tot}(\theta, \phi) = \vec{E}_{m=0}(\theta)e^{im\phi} + 2\sum_{m=1}^M \Re\{\vec{E}_m(\theta)e^{im\phi}\}$ and $\vec{H}_{tot}(\theta, \phi) = \vec{H}_{m=0}(\theta)e^{im\phi} + 2\sum_{m=1}^M \Re\{\vec{H}_m(\theta)e^{im\phi}\}$.  Note that $\vec{E}_m$ and $\vec{H}_m$ are generally complex, and are conjugates for $\pm m$.
+1. For each simulation in the Fourier-series expansion ($m = -M, \ldots , 0, \ldots, M$), compute the far fields $\vec{E}_m$, $\vec{H}_m$ for the desired $\theta$ points in the $rz$ ($\phi = 0$) plane, at an "infinite" radius (i.e., $R \gg \lambda$) using a [near-to-far field transformation](../Python_User_Interface.md#near-to-far-field-spectra).
+2. Obtain the *total* far fields at these points, for a given $\phi$ by summing the far fields from (1): $\vec{E}_{tot}(\theta, \phi) = \vec{E}_{m=0}(\theta)e^{im\phi} +\sum_{m=-M}^M \vec{E}_m(\theta)e^{im\phi}$ and $\vec{H}_{tot}(\theta, \phi) = \vec{H}_{m=0}(\theta)e^{im\phi} + \sum_{m=-M}^M \vec{H}_m(\theta)e^{im\phi}$.  Note that $\vec{E}_m$ and $\vec{H}_m$ are generally complex.  (The $\pm m$ terms are related by a mirror flip in $\phi$, and also by complex conjugation if you also flip the sign of the DFT-monitor frequency and conjugate the source, so it is possible to combine their calculation.)
 3. Compute the radial Poynting flux $P_i(\theta_i, \phi)$ for each of $N$ points $i = 0, 1, ..., N - 1$ on the circumference using $\Re\left[\left[\vec{E}_{tot}(\theta_i, \phi) \times \vec{H}^*_{tot}(\theta_i, \phi)\right]\cdot\hat{r}\right]$.
 
-However, if you want to compute $P(\theta) = \int P(\theta, \phi) d\phi$ in order to obtain the extraction efficiency, the calculations simplify because the cross terms in $\vec{E}_{tot} \times \vec{H}^*_{tot}$ between different $m$'s integrate to zero when integrated over $\phi$ from $0$ to $2\pi$.  Thus, one can replace step (2) with a direct computation of the powers $P(\theta)$ rather than summing the fields.  As a result, the procedure for computing the extraction efficiency within an angular cone for a dipole source at $r > 0$ involves four steps:
+For a demonstration, see [Tutorial/Near to Far Field Spectra/Radiation Pattern of an Antenna in Cylindrical Coordinates](Near_to_Far_Field_Spectra.md#radiation-pattern-of-an-antenna-in-cylindrical-coordinates).
+
+However, if you want to compute the extraction efficiency within an angular cone given $P(\theta) = \int P(\theta, \phi) d\phi$, the calculations simplify because the cross terms in $\vec{E}_{tot} \times \vec{H}^*_{tot}$ between different $m$'s integrate to zero when integrated over $\phi$ from $0$ to $2\pi$.  Thus, one can replace step (2) with a direct computation of the powers $P(\theta)$ rather than summing the fields.  Furthermore $P_{-m}(\theta, \phi) = P_{m}(\theta, -\phi)$ so $P_{-m}(\theta) = P_{m}(\theta)$.  As a result, the procedure for computing the extraction efficiency within an angular cone for a dipole source at $r > 0$ involves three steps:
 
 1. For each simulation in the Fourier-series expansion ($m = 0, 1, ..., M$), compute the far fields $\vec{E}_m$, $\vec{H}_m$ for the desired $\theta$ points in the $rz$ ($\phi = 0$) plane, at an "infinite" radius (i.e., $R \gg \lambda$) using a near-to-far field transformation.
-2. Obtain the powers $P(\theta)$ from these far fields by summing: $P(\theta) = \int_{0}^{2\pi} \left[ P_{m=0}(\theta) + 2\sum_{m=1}^{M} P_m(\theta)  \right] d\phi =  2\pi \Re\left[ \left[\vec{E}_{m=0}(\theta) \times \vec{H}^*_{m=0}(\theta)\right]\cdot\hat{r} + 2\sum_{m=1}^M \left[\vec{E}_{m}(\theta) \times \vec{H}^*_{m}(\theta)\right]\cdot\hat{r} \right]$.
-3. Compute the fraction of the radial Poynting flux within an angular cone $\left[ \int_0^\theta P(\theta') d\theta' \right] / \left[ \int_0^{\pi/2} P(\theta') d\theta' \right]$ by some discretized integral, e.g. a [trapezoidal rule](https://en.wikipedia.org/wiki/Trapezoidal_rule).
-4. Multiply (3) by the extraction efficiency.
+2. Obtain the powers $P(\theta)$ on a hemisphere of radius $R$ from these far fields by summing: $P(\theta) = \int_{0}^{2\pi} R^2 \left[ P_{m=0}(\theta) + 2\sum_{m=1}^{M} P_m(\theta)  \right] d\phi =  2\pi R^2 \Re\left[ \left[\vec{E}_{m=0}(\theta) \times \vec{H}^*_{m=0}(\theta)\right]\cdot\hat{r} + 2\sum_{m=1}^M \left[\vec{E}_{m}(\theta) \times \vec{H}^*_{m}(\theta)\right]\cdot\hat{r} \right]$.
+3. Compute the radiated power within an angular cone $\int_0^\theta \int_0^{2\pi} R^2 P(\theta') \sin(\theta') d\phi d\theta'$ by some discretized integral, e.g. a [trapezoidal rule](https://en.wikipedia.org/wiki/Trapezoidal_rule). The extraction efficiency involves dividing this quantity by the total power emitted by the dipole.  Dividing by the total radiated power $\int_0^{\pi/2} \int_0^{2\pi} R^2 P(\theta') \sin(\theta') d\phi d\theta'$ yields the collection efficiency (which differs from the extraction efficiency if there is absorption).
 
 The simulation script is in [examples/point_dipole_cyl.py](https://github.com/NanoComp/meep/blob/master/python/examples/point_dipole_cyl.py).
 
@@ -646,42 +919,45 @@ import meep as mp
 import numpy as np
 
 
-resolution = 80  # pixels/μm
-n = 2.4  # refractive index of dielectric layer
-wvl = 1.0  # wavelength (in vacuum)
-fcen = 1 / wvl  # center frequency of source/monitor
+RESOLUTION_UM = 50
+WAVELENGTH_UM = 1.0
+N_SLAB = 2.4
+SLAB_THICKNESS_UM = 0.7 * WAVELENGTH_UM / N_SLAB
 
 
-def led_flux(dmat: float, h: float, rpos: float, m: int) -> Tuple[float, float]:
-    """Computes the radiated and total flux (necessary for computing the
-       extraction efficiency) of a point source embedded within a dielectric
-       layer above a lossless-metallic ground plane.
+def dipole_in_slab(zpos: float, rpos_um: float, m: int) -> Tuple[float, float]:
+    """Computes the flux from a dipole in a slab.
 
     Args:
-        dmat: thickness of dielectric layer.
-        h: height of dipole above ground plane as a fraction of dmat.
-        rpos: position of source in radial direction.
-        m: angular φ dependence of the fields exp(imφ).
+      zpos: position of dipole as a fraction of layer thickness.
+      rpos_um: position of source in radial direction.
+      m: angular φ dependence of the fields exp(imφ).
 
     Returns:
-        The radiated and total flux as a 2-Tuple.
+      A 2-tuple of the radiated and total flux.
     """
-    L = 20  # length of non-PML region in radial direction
-    dair = 1.0  # thickness of air padding
-    dpml = 1.0  # PML thickness
-    sr = L + dpml
-    sz = dmat + dair + dpml
-    cell_size = mp.Vector3(sr, 0, sz)
+    pml_um = 1.0  # thickness of PML
+    padding_um = 1.0  # thickness of air padding
+    r_um = 20.0  # length of cell in r
+
+    frequency = 1 / WAVELENGTH_UM  # center frequency of source/monitor
+
+    # runtime termination criteria
+    flux_decay_threshold = 1e-4
+
+    size_r = r_um + pml_um
+    size_z = SLAB_THICKNESS_UM + padding_um + pml_um
+    cell_size = mp.Vector3(size_r, 0, size_z)
 
     boundary_layers = [
-        mp.PML(dpml, direction=mp.R),
-        mp.PML(dpml, direction=mp.Z, side=mp.High),
+        mp.PML(pml_um, direction=mp.R),
+        mp.PML(pml_um, direction=mp.Z, side=mp.High),
     ]
 
-    src_pt = mp.Vector3(rpos, 0, -0.5 * sz + h * dmat)
+    src_pt = mp.Vector3(rpos_um, 0, -0.5 * size_z + zpos * SLAB_THICKNESS_UM)
     sources = [
         mp.Source(
-            src=mp.GaussianSource(fcen, fwidth=0.1 * fcen),
+            src=mp.GaussianSource(frequency, fwidth=0.05 * frequency),
             component=mp.Er,
             center=src_pt,
         ),
@@ -689,101 +965,105 @@ def led_flux(dmat: float, h: float, rpos: float, m: int) -> Tuple[float, float]:
 
     geometry = [
         mp.Block(
-            material=mp.Medium(index=n),
-            center=mp.Vector3(0, 0, -0.5 * sz + 0.5 * dmat),
-            size=mp.Vector3(mp.inf, mp.inf, dmat),
+            material=mp.Medium(index=N_SLAB),
+            center=mp.Vector3(0, 0, -0.5 * size_z + 0.5 * SLAB_THICKNESS_UM),
+            size=mp.Vector3(mp.inf, mp.inf, SLAB_THICKNESS_UM),
         )
     ]
 
     sim = mp.Simulation(
-        resolution=resolution,
+        resolution=RESOLUTION_UM,
         cell_size=cell_size,
         dimensions=mp.CYLINDRICAL,
         m=m,
         boundary_layers=boundary_layers,
         sources=sources,
         geometry=geometry,
+        force_complex_fields=True
     )
 
-    flux_air_mon = sim.add_flux(
-        fcen,
+    flux_mon = sim.add_flux(
+        frequency,
         0,
         1,
         mp.FluxRegion(
-            center=mp.Vector3(0.5 * L, 0, 0.5 * sz - dpml),
-            size=mp.Vector3(L, 0, 0),
+            center=mp.Vector3(0.5 * r_um, 0, 0.5 * size_z - pml_um),
+            size=mp.Vector3(r_um, 0, 0),
         ),
         mp.FluxRegion(
-            center=mp.Vector3(L, 0, 0.5 * sz - dpml - 0.5 * dair),
-            size=mp.Vector3(0, 0, dair),
+            center=mp.Vector3(r_um, 0, 0.5 * size_z - pml_um - 0.5 * padding_um),
+            size=mp.Vector3(0, 0, padding_um),
         ),
     )
 
     sim.run(
-        mp.dft_ldos(fcen, 0, 1),
-        until_after_sources=mp.stop_when_fields_decayed(
-            50.0,
-            mp.Er,
-            src_pt,
-            1e-8,
+        mp.dft_ldos(frequency, 0, 1),
+        until_after_sources=mp.stop_when_dft_decayed(
+            tol=flux_decay_threshold
         ),
     )
 
-    flux_air = mp.get_fluxes(flux_air_mon)[0]
+    radiated_flux = mp.get_fluxes(flux_mon)[0]
 
-    if rpos == 0:
-        dV = np.pi / (resolution**3)
-    else:
-        dV = 2 * np.pi * rpos / (resolution**2)
+    # volume of the ring current source
+    delta_vol = 2 * np.pi * rpos_um / (RESOLUTION_UM**2)
 
     # total flux from point source via LDOS
-    flux_src = -np.real(sim.ldos_Fdata[0] * np.conj(sim.ldos_Jdata[0])) * dV
+    source_flux = (-np.real(sim.ldos_Fdata[0] * np.conj(sim.ldos_Jdata[0])) *
+                   delta_vol)
 
-    print(f"flux-cyl:, {rpos:.2f}, {m:3d}, {flux_src:.6f}, {flux_air:.6f}")
+    print(f"flux-cyl:, {rpos_um:.2f}, {m:3d}, "
+          f"{source_flux:.6f}, {radiated_flux:.6f}")
 
-    return flux_air, flux_src
+    return radiated_flux, source_flux
 
 
 if __name__ == "__main__":
-    layer_thickness = 0.7 * wvl / n
     dipole_height = 0.5
 
-    # r = 0 source requires a single simulation with m = ±1
-    rpos = 0
+    # An Er source at r = 0 needs to be slightly offset.
+    # https://github.com/NanoComp/meep/issues/2704
+    dipole_rpos_um = 1.5 / RESOLUTION_UM
+
+    # Er source at r = 0 requires a single simulation with m = ±1.
     m = 1
-    flux_air, flux_src = led_flux(
-        layer_thickness,
+    radiated_flux, source_flux = dipole_in_slab(
         dipole_height,
-        rpos,
+        dipole_rpos_um,
         m,
     )
-    ext_eff = flux_air / flux_src
-    print(f"exteff:, {rpos}, {ext_eff:.6f}")
+    extraction_efficiency = radiated_flux / source_flux
+    print(f"exteff:, {dipole_rpos_um}, {extraction_efficiency:.6f}")
 
-    # r > 0 source requires Fourier-series expansion of φ
-    flux_tol = 1e-5  # threshold flux to determine when to truncate expansion
-    rpos = [3.5, 6.7, 9.5]
-    for rp in rpos:
-        flux_src_tot = 0
-        flux_air_tot = 0
-        flux_air_max = 0
+    # Er source at r > 0 requires Fourier-series expansion of φ.
+
+    # Threshold flux to determine when to truncate expansion.
+    flux_decay_threshold = 1e-2
+
+    dipole_rpos_um = [3.5, 6.7, 9.5]
+    for rpos_um in dipole_rpos_um:
+        source_flux_total = 0
+        radiated_flux_total = 0
+        radiated_flux_max = 0
         m = 0
         while True:
-            flux_air, flux_src = led_flux(
-                layer_thickness,
+            radiated_flux, source_flux = dipole_in_slab(
                 dipole_height,
-                rp,
+                rpos_um,
                 m,
             )
-            flux_air_tot += flux_air if m == 0 else 2 * flux_air
-            flux_src_tot += flux_src if m == 0 else 2 * flux_src
-            if flux_air > flux_air_max:
-                flux_air_max = flux_air
-            if m > 0 and (flux_air / flux_air_max) < flux_tol:
+            radiated_flux_total += radiated_flux * (1 if m == 0 else 2)
+            source_flux_total += source_flux * (1 if m == 0 else 2)
+
+            if radiated_flux > radiated_flux_max:
+                radiated_flux_max = radiated_flux
+
+            if (m > 0 and
+                (radiated_flux / radiated_flux_max) < flux_decay_threshold):
                 break
-            m += 1
+            else:
+                m += 1
 
-        ext_eff = flux_air_tot / flux_src_tot
-        print(f"exteff:, {rp}, {ext_eff:.6f}")
-
+        extraction_efficiency = radiated_flux_total / source_flux_total
+        print(f"exteff:, {rpos_um}, {extraction_efficiency:.6f}")
 ```

@@ -72,7 +72,11 @@ def get_source(m):
 
 def forward_simulation(design_params, m, far_x):
     matgrid = mp.MaterialGrid(
-        mp.Vector3(Nr, 0, Nz), SiO2, Si, weights=design_params.reshape(Nr, 1, Nz)
+        mp.Vector3(Nr, 0, Nz),
+        SiO2,
+        Si,
+        weights=design_params.reshape(Nr, 1, Nz),
+        do_averaging=True,
     )
 
     geometry = [
@@ -113,7 +117,9 @@ def forward_simulation(design_params, m, far_x):
 
 def adjoint_solver(design_params, m, far_x):
 
-    design_variables = mp.MaterialGrid(mp.Vector3(Nr, 0, Nz), SiO2, Si)
+    design_variables = mp.MaterialGrid(
+        mp.Vector3(Nr, 0, Nz), SiO2, Si, do_averaging=True
+    )
     design_region = mpa.DesignRegion(
         design_variables,
         volume=mp.Volume(
@@ -202,7 +208,7 @@ class TestAdjointSolver(ApproxComparisonTestCase):
         adj_scale = (dp[None, :] @ adjsol_grad).flatten()
         fd_grad = S12_perturbed - S12_unperturbed
         print(f"Directional derivative -- adjoint solver: {adj_scale}, FD: {fd_grad}")
-        tol = 0.3
+        tol = 0.6 if m == 0 else 0.3
         self.assertClose(adj_scale, fd_grad, epsilon=tol)
 
 

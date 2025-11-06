@@ -1,4 +1,4 @@
-/* Copyright (C) 2005-2023 Massachusetts Institute of Technology
+/* Copyright (C) 2005-2025 Massachusetts Institute of Technology
 %
 %  This program is free software; you can redistribute it and/or modify
 %  it under the terms of the GNU General Public License as published by
@@ -127,6 +127,9 @@ void fields::dump(const char *filename, bool single_parallel_file) {
                           [](fields_chunk *chunk, int c, int d) { return &(chunk->f_w[c][d]); });
   dump_fields_chunk_field(&file, single_parallel_file, "f_cond",
                           [](fields_chunk *chunk, int c, int d) { return &(chunk->f_cond[c][d]); });
+  dump_fields_chunk_field(
+      &file, single_parallel_file, "f_bfast",
+      [](fields_chunk *chunk, int c, int d) { return &(chunk->f_bfast[c][d]); });
   dump_fields_chunk_field(
       &file, single_parallel_file, "f_w_prev",
       [](fields_chunk *chunk, int c, int d) { return &(chunk->f_w_prev[c][d]); });
@@ -257,6 +260,9 @@ void fields::load(const char *filename, bool single_parallel_file) {
                           [](fields_chunk *chunk, int c, int d) { return &(chunk->f_w[c][d]); });
   load_fields_chunk_field(&file, single_parallel_file, "f_cond",
                           [](fields_chunk *chunk, int c, int d) { return &(chunk->f_cond[c][d]); });
+  load_fields_chunk_field(
+      &file, single_parallel_file, "f_bfast",
+      [](fields_chunk *chunk, int c, int d) { return &(chunk->f_bfast[c][d]); });
   load_fields_chunk_field(
       &file, single_parallel_file, "f_w_prev",
       [](fields_chunk *chunk, int c, int d) { return &(chunk->f_w_prev[c][d]); });

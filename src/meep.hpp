@@ -1,4 +1,4 @@
-/* Copyright (C) 2005-2023 Massachusetts Institute of Technology
+/* Copyright (C) 2005-2025 Massachusetts Institute of Technology
 %
 %  This program is free software; you can redistribute it and/or modify
 %  it under the terms of the GNU General Public License as published by
@@ -1244,6 +1244,7 @@ public:
   dft_flux(const dft_flux &f);
 
   double *flux();
+  std::vector<std::complex<double> > complexflux();
 
   void save_hdf5(h5file *file, const char *dprefix = 0);
   void load_hdf5(h5file *file, const char *dprefix = 0);
@@ -1359,21 +1360,21 @@ public:
   dft_near2far(const dft_near2far &f);
 
   /* return an array (Ex,Ey,Ez,Hx,Hy,Hz) x Nfreq of the far fields at x */
-  std::complex<double> *farfield(const vec &x);
+  std::complex<double> *farfield(const vec &x, double greencyl_tol = 1e-3);
 
   /* like farfield, but requires F to be Nfreq*6 preallocated array, and
      does *not* perform the reduction over processes...an MPI allreduce
      summation by the caller is required to get the final result ... used
      by other output routine to efficiently get far field on a grid of pts */
-  void farfield_lowlevel(std::complex<double> *F, const vec &x);
+  void farfield_lowlevel(std::complex<double> *F, const vec &x, double greencyl_tol = 1e-3);
 
   /* Return a newly allocated array with all far fields */
   double *get_farfields_array(const volume &where, int &rank, size_t *dims, size_t &N,
-                              double resolution);
+                              double resolution, double greencyl_tol = 1e-3);
 
   /* output far fields on a grid to an HDF5 file */
-  void save_farfields(const char *fname, const char *prefix, const volume &where,
-                      double resolution);
+  void save_farfields(const char *fname, const char *prefix, const volume &where, double resolution,
+                      double greencyl_tol = 1e-3);
 
   /* output Poynting flux of far fields */
   double *flux(direction df, const volume &where, double resolution);
@@ -1399,7 +1400,7 @@ public:
   double periodic_k[2], period[2];
 
   std::vector<sourcedata> near_sourcedata(const vec &x_0, double *farpt_list, size_t nfar_pts,
-                                          const std::complex<double> *dJ);
+                                          const std::complex<double> *dJ, double greencyl_tol);
 };
 
 /* Class to compute local-density-of-states spectra: the power spectrum
@@ -1465,6 +1466,8 @@ public:
   realnum *f_w[NUM_FIELD_COMPONENTS][2];    // E/H integrated from these
   realnum *f_cond[NUM_FIELD_COMPONENTS][2]; // aux field for PML+conductivity
 
+  realnum *f_bfast[NUM_FIELD_COMPONENTS][2];
+
   /* sometimes, to synchronize the E and H fields, e.g. for computing
      flux at a given time, we need to timestep H by 1/2; in this case
      we save backup copies of (some of) the fields to resume timestepping */
@@ -1473,6 +1476,7 @@ public:
   realnum *f_w_backup[NUM_FIELD_COMPONENTS][2];
   realnum *f_cond_backup[NUM_FIELD_COMPONENTS][2];
 
+  realnum *f_bfast_backup[NUM_FIELD_COMPONENTS][2];
   // W (or E/H) field from prev. timestep, only stored if needed by update_pols
   realnum *f_w_prev[NUM_FIELD_COMPONENTS][2];
 
@@ -1499,6 +1503,7 @@ public:
   volume v;
   double m;                        // angular dependence in cyl. coords
   bool zero_fields_near_cylorigin; // fields=0 m pixels near r=0 for stability
+  std::vector<double> bfast_scaled_k;
   double beta;
   int is_real;
   std::vector<src_vol> sources[NUM_FIELD_TYPES];
@@ -1508,7 +1513,8 @@ public:
   int chunk_idx;
 
   fields_chunk(structure_chunk *, const char *outdir, double m, double beta,
-               bool zero_fields_near_cylorigin, int chunkidx, int loop_tile_base_db);
+               bool zero_fields_near_cylorigin, int chunkidx, int loop_tile_base_db,
+               std::vector<double> bfast_scaled_k);
 
   fields_chunk(const fields_chunk &, int chunkidx);
   ~fields_chunk();
@@ -1736,6 +1742,7 @@ public:
   grid_volume gv, user_volume;
   volume v;
   double m;
+  std::vector<double> bfast_scaled_k;
   double beta;
   int t, phasein_time, is_real;
   std::complex<double> k[5], eikna[5];
@@ -1747,7 +1754,8 @@ public:
 
   // fields.cpp methods:
   fields(structure *, double m = 0, double beta = 0, bool zero_fields_near_cylorigin = true,
-         int loop_tile_base_db = 0, int loop_tile_base_eh = 0);
+         int loop_tile_base_db = 0, int loop_tile_base_eh = 0,
+         std::vector<double> bfast_scaled_k = {0, 0, 0});
   fields(const fields &);
   ~fields();
   bool equal_layout(const fields &f) const;

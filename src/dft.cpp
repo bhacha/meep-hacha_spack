@@ -1,4 +1,4 @@
-/* Copyright (C) 2005-2023 Massachusetts Institute of Technology
+/* Copyright (C) 2005-2025 Massachusetts Institute of Technology
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -543,6 +543,21 @@ double *dft_flux::flux() {
   double *Fsum = new double[Nfreq];
   sum_to_all(F, Fsum, int(Nfreq));
   delete[] F;
+  return Fsum;
+}
+
+std::vector<std::complex<double> > dft_flux::complexflux() {
+  const size_t Nfreq = freq.size();
+  std::vector<std::complex<double> > F(Nfreq);
+  for (size_t i = 0; i < Nfreq; ++i)
+    F[i] = 0.0;
+  for (dft_chunk *curE = E, *curH = H; curE && curH;
+       curE = curE->next_in_dft, curH = curH->next_in_dft)
+    for (size_t k = 0; k < curE->N; ++k)
+      for (size_t i = 0; i < Nfreq; ++i)
+        F[i] += curE->dft[k * Nfreq + i] * conj(curH->dft[k * Nfreq + i]);
+  std::vector<std::complex<double> > Fsum(Nfreq);
+  sum_to_all(&F[0], &Fsum[0], int(Nfreq));
   return Fsum;
 }
 

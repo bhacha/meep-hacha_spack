@@ -3,6 +3,7 @@ A collection of objects and helper routines for setting up the simulation.
 """
 
 import functools
+import inspect
 import math
 import numbers
 import os
@@ -93,11 +94,12 @@ def fix_dft_args(args, i):
 
 
 def get_num_args(func):
-    return (
-        2
-        if isinstance(func, Harminv) or isinstance(func, PadeDFT)
-        else func.__code__.co_argcount
-    )
+    if isinstance(func, Harminv) or isinstance(func, PadeDFT):
+        return 2
+    elif inspect.ismethod(func):
+        return func.__code__.co_argcount - 1  # remove 'self' from count
+    else:
+        return func.__code__.co_argcount
 
 
 def vec(*args):
@@ -697,6 +699,10 @@ class DftFlux(DftObj):
         return self.swigobj_attr("flux")
 
     @property
+    def complexflux(self):
+        return self.swigobj_attr("complexflux")
+
+    @property
     def E(self):
         return self.swigobj_attr("E")
 
@@ -1230,6 +1236,7 @@ class Simulation:
         force_complex_fields: bool = False,
         default_material: Medium = mp.Medium(),
         m: float = 0,
+        bfast_scaled_k: Optional[Vector3Type] = None,
         k_point: Union[Vector3Type, bool] = False,
         kz_2d: str = "complex",
         extra_materials: Optional[List[Medium]] = None,
@@ -1527,6 +1534,7 @@ class Simulation:
         self.last_eps_filename = ""
         self.output_h5_hook = lambda fname: False
         self.interactive = False
+        self.bfast_scaled_k = (0, 0, 0) if bfast_scaled_k is None else bfast_scaled_k
         self.is_cylindrical = False
         self.material_function = material_function
         self.epsilon_func = epsilon_func
@@ -2475,6 +2483,7 @@ class Simulation:
             not self.accurate_fields_near_cylorigin,
             self.loop_tile_base_db,
             self.loop_tile_base_eh,
+            self.bfast_scaled_k,
         )
 
         if self.force_all_components and self.dimensions != 1:
@@ -2768,6 +2777,7 @@ class Simulation:
         """
         if not dname:
             dname = self.get_filename_prefix() + "-out"
+            self.filename_prefix = None
 
         closure = {"trashed": False}
 
@@ -2783,7 +2793,6 @@ class Simulation:
 
         if self.fields is not None:
             hook()
-        self.filename_prefix = None
 
         return dname
 
@@ -3206,7 +3215,7 @@ class Simulation:
         self.load_energy(fname, energy)
         energy.scale_dfts(-1.0)
 
-    def get_farfield(self, near2far, x):
+    def get_farfield(self, near2far, x, greencyl_tol: float = 1e-3):
         """
         Given a `Vector3` point `x` which can lie anywhere outside the near-field surface,
         including outside the cell and a `near2far` object, returns the computed
@@ -3214,11 +3223,13 @@ class Simulation:
         of fields $(E_x^1,E_y^1,E_z^1,H_x^1,H_y^1,H_z^1,E_x^2,E_y^2,E_z^2,H_x^2,H_y^2,H_z^2,...)$
         in Cartesian coordinates and
         $(E_r^1,E_\\phi^1,E_z^1,H_r^1,H_\\phi^1,H_z^1,E_r^2,E_\\phi^2,E_z^2,H_r^2,H_\\phi^2,H_z^2,...)$
-        in cylindrical coordinates for the frequencies 1,2,...,`nfreq`.
+        in cylindrical coordinates for the frequencies 1,2,...,`nfreq`. `greencyl_tol` specifies the
+        convergence tolerance of the azimuthal ($\\phi$) integral in the calculation of the far field.
         """
         return mp._get_farfield(
             near2far.swigobj,
             py_v3_to_vec(self.dimensions, x, is_cylindrical=self.is_cylindrical),
+            greencyl_tol,
         )
 
     def get_farfields(
@@ -3228,8 +3239,9 @@ class Simulation:
         where: Volume = None,
         center: Vector3Type = None,
         size: Vector3Type = None,
+        greencyl_tol: float = 1e-3,
     ):
-        """
+        r"""
         Like `output_farfields` but returns a dictionary of NumPy arrays instead of
         writing to a file. The dictionary keys are `Ex`, `Ey`, `Ez`, `Hx`, `Hy`, `Hz`.
         Each array has the same shape as described in `output_farfields`.
@@ -3238,13 +3250,17 @@ class Simulation:
         of the fields, and hence cannot be directly compared to time-domain fields. In
         practice, it is easiest to use the far fields in computations where overall
         scaling (units) cancel out or are irrelevant, e.g. to compute the fraction of the
-        far fields in one region vs. another region.
+        far fields in one region vs. another region. `greencyl_tol` specifies the
+        convergence tolerance of the azimuthal ($\phi$) integral in the calculation
+        of the far field.
         """
         if self.fields is None:
             self.init_sim()
         vol = self._volume_from_kwargs(where, center, size)
         self.fields.am_now_working_on(mp.GetFarfieldsTime)
-        result = mp._get_farfields_array(near2far.swigobj, vol, resolution)
+        result = mp._get_farfields_array(
+            near2far.swigobj, vol, resolution, greencyl_tol
+        )
         self.fields.finished_working()
         res_ex = complexarray(result[0], result[1])
         res_ey = complexarray(result[2], result[3])
@@ -3269,6 +3285,7 @@ class Simulation:
         where: Volume = None,
         center: Vector3Type = None,
         size: Vector3Type = None,
+        greencyl_tol: float = 1e-3,
     ):
         """
         Given an HDF5 file name `fname` (does *not* include the `.h5` suffix), a `Volume`
@@ -3280,13 +3297,17 @@ class Simulation:
         Fourier-transformed $\\mathbf{E}$ and $\\mathbf{H}$ fields on this grid. Each dataset
         is an $n_x \\times n_y \\times n_z \\times nfreq$ 4d array of $space \\times frequency$
         although dimensions that are equal to one are omitted. The volume can optionally be
-        specified via `center` and `size`.
+        specified via `center` and `size`. For simulations in cylindrical coordinates,
+        `greencyl_tol` specifies the tolerance of the azimuthal ($\\phi$) integral in the
+        calculation of the far fields.
         """
         if self.fields is None:
             self.init_sim()
         vol = self._volume_from_kwargs(where, center, size)
         self.fields.am_now_working_on(mp.GetFarfieldsTime)
-        near2far.save_farfields(fname, self.get_filename_prefix(), vol, resolution)
+        near2far.save_farfields(
+            fname, self.get_filename_prefix(), vol, resolution, greencyl_tol
+        )
         self.fields.finished_working()
 
     def load_near2far(self, fname, near2far):
@@ -4139,8 +4160,9 @@ class Simulation:
         direction: int = mp.AUTOMATIC,
     ) -> NamedTuple:
         """
-        Given a flux object and list of band indices (integers) `bands` or a `DiffractedPlanewave` object,
-        return a `namedtuple` with the following fields:
+        Given a flux object and either a list of indices `bands` (starts at one)
+        or a `DiffractedPlanewave` object, return a `namedtuple` with the
+        following fields:
 
         + `alpha`: the complex eigenmode coefficients as a 3d NumPy array of size
           (`len(bands)`, `flux.nfreqs`, `2`). The last/third dimension refers to modes
@@ -4753,10 +4775,10 @@ class Simulation:
         field_parameters: Optional[dict] = None,
         colorbar_parameters: Optional[dict] = None,
         frequency: Optional[float] = None,
-        plot_eps_flag: bool = True,
-        plot_sources_flag: bool = True,
-        plot_monitors_flag: bool = True,
-        plot_boundaries_flag: bool = True,
+        show_epsilon: bool = True,
+        show_sources: bool = True,
+        show_monitors: bool = True,
+        show_boundary_layers: bool = True,
         nb: bool = False,
         **kwargs,
     ) -> None:
@@ -4882,10 +4904,10 @@ class Simulation:
             field_parameters=field_parameters,
             colorbar_parameters=colorbar_parameters,
             frequency=frequency,
-            plot_eps_flag=plot_eps_flag,
-            plot_sources_flag=plot_sources_flag,
-            plot_monitors_flag=plot_monitors_flag,
-            plot_boundaries_flag=plot_boundaries_flag,
+            show_epsilon=show_epsilon,
+            show_sources=show_sources,
+            show_monitors=show_monitors,
+            show_boundary_layers=show_boundary_layers,
             nb=nb,
             **kwargs,
         )

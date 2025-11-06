@@ -10,6 +10,8 @@ $$\operatorname{LDOS}_{\ell}(\vec{x}_0,\omega)=-\frac{2}{\pi}\varepsilon(\vec{x}
 
 where the $|\hat{p}(\omega)|^2$ normalization is necessary for obtaining the power exerted by a unit-amplitude dipole assuming linear materials. In FDTD, computing the LDOS is straightforward: excite a point dipole source and accumulate the Fourier transforms of the field at a given point in space to obtain the entire LDOS spectrum in a single calculation. This is implemented in the `dft_ldos` feature which is the subject of this tutorial.
 
+Note: computing the LDOS using this formula is only valid for *lossless* media (i.e., $\varepsilon$ and $\mu$ are purely real). The formula yields a finite result in the limit of infinite resolution. This is not the case for lossy media (i.e., complex $\varepsilon$), in which the LDOS diverges with resolution: in the continuum limit, the dipole's near fields dissipate an infinite amount of energy.   A physical dipole-like source (e.g. spontaneous emission by an atom) expends a finite amount of energy, of course, but it is regularized by atomic-scale effects that are not included in classical electromagnetism.  (Some authors have proposed artifical regularizations, e.g. by surrounding the dipole with a small box of vacuum, or computing the outward Poynting flux through a small box, but in both cases the result diverges as the box size decreases, so there is no physically meaningful result.)  Therefore, we do not recommend using the LDOS feature within a lossy medium.
+
 [TOC]
 
 Planar Cavity with Lossless Metallic Walls
@@ -25,9 +27,9 @@ In 3D, each simulation uses three [mirror symmetries](../Exploiting_Symmetry.md#
 
 In cylindrical coordinates, the dipole is polarized in the $r$ direction. Setting up a linearly polarized source in cylindrical coordinates is demonstrated in [Tutorial/Cylindrical Coordinates/Scattering Cross Section of a Finite Dielectric Cylinder](Cylindrical_Coordinates.md#scattering-cross-section-of-a-finite-dielectric-cylinder). However, all that is necessary in this example which involves a single point dipole rather than a planewave is one simulation involving an $E_r$ source at $r=0$ with $m=-1$. This is actually a circularly polarized source but this is sufficient because the $m=+1$ simulation produces an identical result to the $m=-1$ simulation. It is therefore not necessary to perform two separate simulations for $m=\pm 1$ in order to average the results from the left- and right-circularly polarized sources.
 
-One important parameter when setting up this calculation is the grid resolution.
+One important parameter when setting up this calculation is the grid resolution. In this example, the length of the cavity is used to specify the length of the computational cell in $z$. However, it is important to note that Meep will *round the cell size to the nearest pixel*. This means there will likely be a small discrepancy between the intended cavity length and the value used by Meep. Demonstrating consistent agreement between the simulated and analytic Purcell enhancement for a range of cavity lengths may therefore require using a fine grid resolution.
 
-A key feature of the LDOS in this geometry is that it experiences discontinuities, called  [Van Hove singularities](https://en.wikipedia.org/wiki/Van_Hove_singularity), any time the cavity thickness/λ passes through the cutoff for a waveguide mode, which occurs for cavity-thickness/λ values of 0.5, 1.5, 2.5, etc.   (Mathematically, Van Hove singularities depend strongly on the dimensionality — it is a discontinuity in this case because the waves are propagating along two dimensions, i.e. each cutoff is a minimum in the 2d dispersion relation $\omega(k_x,k_y)$.)  This discontinuity also means that the LDOS *exactly at* the cutoff thickness/λ is ill-defined and convergence with discretization can be problematic at this point.  (In consequence, the LDOS *exactly* at the Van Hove discontinuity can behave erratically with resolution, and should be viewed with caution.)
+A key feature of the LDOS in this geometry is that it experiences discontinuities, called [Van Hove singularities](https://en.wikipedia.org/wiki/Van_Hove_singularity), any time the cavity thickness/λ passes through the cutoff for a waveguide mode, which occurs for cavity-thickness/λ values of 0.5, 1.5, 2.5, etc. (Mathematically, Van Hove singularities depend strongly on the dimensionality — it is a discontinuity in this case because the waves are propagating along two dimensions, i.e. each cutoff is a minimum in the 2d dispersion relation $\omega(k_x,k_y)$.)  This discontinuity also means that the LDOS *exactly at* the cutoff thickness/λ is ill-defined and convergence with discretization can be problematic at this point.  (In consequence, the LDOS *exactly* at the Van Hove discontinuity can behave erratically with resolution, and should be viewed with caution.)
 
 As shown in the plot below, the results from Meep for both coordinate systems agree well with the analytic theory over the entire range of values of the cavity thickness.
 
@@ -38,185 +40,180 @@ As shown in the plot below, the results from Meep for both coordinate systems ag
 The simulation script is [examples/planar_cavity_ldos.py](https://github.com/NanoComp/meep/blob/master/python/examples/planar_cavity_ldos.py).
 
 ```py
+from typing import Optional
+
+import matplotlib.pyplot as plt
 import meep as mp
 import numpy as np
-import matplotlib
-matplotlib.use('agg')
-import matplotlib.pyplot as plt
 
 
-# important note:
-# Meep may round the cell dimensions to an integer number
-# of pixels which could modify the cavity structure.
-resolution = 70  # pixels/μm
+# Note: Meep may round the cell dimensions to an integer number of pixels which
+# could modify the cavity structure.
+RESOLUTION_UM = 71
+
+PML_UM = 0.5
+BULK_UM = 6.0
+N_CAVITY = 2.4
+WAVELENGTH_UM = 1.0
+FIELD_DECAY_TOL = 1e-6
+FIELD_DECAY_PERIOD = 20
+
+frequency = 1 / WAVELENGTH_UM
 
 
-dpml = 0.5       # thickness of PML
-L = 6.0          # length of non-PML region
-n = 2.4          # refractive index of surrounding medium
-wvl = 1.0        # wavelength (in vacuum)
+def ldos_cyl(cavity_um: Optional[float] = None) -> float:
+    """Computes the LDOS of a dipole in a cavity or bulk media in cyl. coords.
 
-fcen = 1/wvl
+    Args:
+        cavity_um: thickness of the cavity. If None, bulk media is used.
 
+    Returns:
+        The LDOS of the dipole.
+    """
+    if cavity_um is None:
+        cell_z_um = BULK_UM + 2 * PML_UM
+        pml_layers = [mp.PML(thickness=PML_UM)]
+    else:
+        cell_z_um = cavity_um
+        pml_layers = [mp.PML(thickness=PML_UM, direction=mp.R)]
 
-def bulk_ldos_cyl():
-    sr = L+dpml
-    sz = L+2*dpml
-    cell_size = mp.Vector3(sr,0,sz)
+    cell_r_um = BULK_UM + PML_UM
+    cell_size = mp.Vector3(cell_r_um, 0, cell_z_um)
 
-    pml_layers = [mp.PML(dpml)]
+    # An Er source at r = 0 and m=±1 needs to be slightly offset.
+    # https://github.com/NanoComp/meep/issues/2704
+    dipole_rpos_um = 1.5 / RESOLUTION_UM
 
-    sources = [mp.Source(src=mp.GaussianSource(fcen,fwidth=0.2*fcen),
-                         component=mp.Er,
-                         center=mp.Vector3())]
+    src_pt = mp.Vector3(dipole_rpos_um, 0, 0)
+    sources = [
+        mp.Source(
+            src=mp.GaussianSource(frequency, fwidth=0.2 * frequency),
+            component=mp.Er,
+            center=src_pt,
+        )
+    ]
 
-    sim = mp.Simulation(resolution=resolution,
-                        cell_size=cell_size,
-                        boundary_layers=pml_layers,
-                        sources=sources,
-                        dimensions=mp.CYLINDRICAL,
-                        m=-1,
-                        default_material=mp.Medium(index=n))
+    sim = mp.Simulation(
+        resolution=RESOLUTION_UM,
+        cell_size=cell_size,
+        boundary_layers=pml_layers,
+        sources=sources,
+        dimensions=mp.CYLINDRICAL,
+        m=-1,
+        default_material=mp.Medium(index=N_CAVITY),
+    )
 
-    sim.run(mp.dft_ldos(fcen,0,1),
-            until_after_sources=mp.stop_when_fields_decayed(20,
-                                                            mp.Er,
-                                                            mp.Vector3(),
-                                                            1e-6))
-
-    return sim.ldos_data[0]
-
-
-def cavity_ldos_cyl(sz):
-    sr = L+dpml
-    cell_size = mp.Vector3(sr,0,sz)
-
-    pml_layers = [mp.PML(dpml,direction=mp.R)]
-
-    sources = [mp.Source(src=mp.GaussianSource(fcen,fwidth=0.2*fcen),
-                         component=mp.Er,
-                         center=mp.Vector3())]
-
-    sim = mp.Simulation(resolution=resolution,
-                        cell_size=cell_size,
-                        boundary_layers=pml_layers,
-                        sources=sources,
-                        dimensions=mp.CYLINDRICAL,
-                        m=-1,
-                        default_material=mp.Medium(index=n))
-
-    sim.run(mp.dft_ldos(fcen,0,1),
-            until_after_sources=mp.stop_when_fields_decayed(20,
-                                                            mp.Er,
-                                                            mp.Vector3(),
-                                                            1e-6))
+    sim.run(
+        mp.dft_ldos(frequency, 0, 1),
+        until_after_sources=mp.stop_when_fields_decayed(
+            FIELD_DECAY_PERIOD, mp.Er, src_pt, FIELD_DECAY_TOL
+        ),
+    )
 
     return sim.ldos_data[0]
 
 
-def bulk_ldos_3D():
-    s = L+2*dpml
-    cell_size = mp.Vector3(s,s,s)
+def ldos_3d(cavity_um: Optional[float] = None) -> float:
+    """Computes the LDOS of a dipole in a cavity or bulk media in 3D coords.
 
-    pml_layers = [mp.PML(dpml)]
+    Args:
+        cavity_um: thickness of the cavity. If None, bulk media is used.
 
-    sources = [mp.Source(src=mp.GaussianSource(fcen,fwidth=0.2*fcen),
-                         component=mp.Ex,
-                         center=mp.Vector3())]
+    Returns:
+        The LDOS of the dipole.
+    """
+    if cavity_um is None:
+        size_z_um = BULK_UM + 2 * PML_UM
+        pml_layers = [mp.PML(thickness=PML_UM)]
+    else:
+        size_z_um = cavity_um
+        pml_layers = [
+            mp.PML(thickness=PML_UM, direction=mp.X),
+            mp.PML(thickness=PML_UM, direction=mp.Y),
+        ]
 
-    symmetries = [mp.Mirror(direction=mp.X,phase=-1),
-                  mp.Mirror(direction=mp.Y),
-                  mp.Mirror(direction=mp.Z)]
+    size_xy_um = BULK_UM + 2 * PML_UM
+    cell_size = mp.Vector3(size_xy_um, size_xy_um, size_z_um)
 
-    sim = mp.Simulation(resolution=resolution,
-                        cell_size=cell_size,
-                        boundary_layers=pml_layers,
-                        sources=sources,
-                        symmetries=symmetries,
-                        default_material=mp.Medium(index=n))
+    sources = [
+        mp.Source(
+            src=mp.GaussianSource(frequency, fwidth=0.2 * frequency),
+            component=mp.Ex,
+            center=mp.Vector3(),
+        )
+    ]
 
-    sim.run(mp.dft_ldos(fcen,0,1),
-            until_after_sources=mp.stop_when_fields_decayed(20,
-                                                            mp.Ex,
-                                                            mp.Vector3(),
-                                                            1e-6))
+    symmetries = [
+        mp.Mirror(direction=mp.X, phase=-1),
+        mp.Mirror(direction=mp.Y),
+        mp.Mirror(direction=mp.Z),
+    ]
 
-    return sim.ldos_data[0]
+    sim = mp.Simulation(
+        resolution=RESOLUTION_UM,
+        cell_size=cell_size,
+        boundary_layers=pml_layers,
+        sources=sources,
+        symmetries=symmetries,
+        default_material=mp.Medium(index=N_CAVITY),
+    )
 
-
-def cavity_ldos_3D(sz):
-    sxy = L+2*dpml
-    cell_size = mp.Vector3(sxy,sxy,sz)
-
-    boundary_layers = [mp.PML(dpml,direction=mp.X),
-                       mp.PML(dpml,direction=mp.Y)]
-
-    sources = [mp.Source(src=mp.GaussianSource(fcen,fwidth=0.2*fcen),
-                         component=mp.Ex,
-                         center=mp.Vector3())]
-
-    symmetries = [mp.Mirror(direction=mp.X,phase=-1),
-                  mp.Mirror(direction=mp.Y),
-                  mp.Mirror(direction=mp.Z)]
-
-    sim = mp.Simulation(resolution=resolution,
-                        cell_size=cell_size,
-                        boundary_layers=boundary_layers,
-                        sources=sources,
-                        symmetries=symmetries,
-                        default_material=mp.Medium(index=n))
-
-    sim.run(mp.dft_ldos(fcen,0,1),
-            until_after_sources=mp.stop_when_fields_decayed(20,
-                                                            mp.Ex,
-                                                            mp.Vector3(),
-                                                            1e-6))
+    sim.run(
+        mp.dft_ldos(frequency, 0, 1),
+        until_after_sources=mp.stop_when_fields_decayed(
+            FIELD_DECAY_PERIOD, mp.Ex, mp.Vector3(), FIELD_DECAY_TOL
+        ),
+    )
 
     return sim.ldos_data[0]
 
 
-if __name__ == '__main__':
-    ldos_bulk_cyl = bulk_ldos_cyl()
-    ldos_bulk_3D = bulk_ldos_3D()
+if __name__ == "__main__":
+    ldos_bulk_cyl = ldos_cyl()
+    ldos_bulk_3d = ldos_3d()
 
-    # units of wavelength in cavity medium
-    cavity_thickness = np.arange(0.50,2.55,0.05)
+    cavity_um = np.arange(0.50, 2.55, 0.05)
+    vacuum_cavity_um = cavity_um * WAVELENGTH_UM / N_CAVITY
 
-    gap = cavity_thickness*wvl/n
+    num_cavity_um = cavity_um.shape[0]
+    ldos_cavity_cyl = np.zeros(num_cavity_um)
+    ldos_cavity_3d = np.zeros(num_cavity_um)
 
-    ldos_cavity_cyl = np.zeros(len(cavity_thickness))
-    ldos_cavity_3D = np.zeros(len(cavity_thickness))
-    for idx,g in enumerate(gap):
-        ldos_cavity_cyl[idx] = cavity_ldos_cyl(g)
-        ldos_cavity_3D[idx] = cavity_ldos_3D(g)
-        print("purcell-enh:, {:.3f}, "
-              "{:.6f} (cyl.), {:.6f} (3D)".format(cavity_thickness[idx],
-                                                  ldos_cavity_cyl[idx]/ldos_bulk_cyl,
-                                                  ldos_cavity_3D[idx]/ldos_bulk_3D))
+    for j in range(num_cavity_um):
+        ldos_cavity_cyl[j] = ldos_cyl(vacuum_cavity_um[j])
+        ldos_cavity_3d[j] = ldos_3d(vacuum_cavity_um[j])
+        purcell_cyl = ldos_cavity_cyl[j] / ldos_bulk_cyl
+        purcell_3d = ldos_cavity_3d[j] / ldos_bulk_3d
+        print(f"purcell:, {cavity_um[j]:.3f}, {purcell_cyl:.6f}, {purcell_3d:.6f}")
 
     # Purcell enhancement factor (relative to bulk medium)
-    pe_meep_cyl = ldos_cavity_cyl / ldos_bulk_cyl
-    pe_meep_3D = ldos_cavity_3D / ldos_bulk_3D
+    purcell_meep_cyl = ldos_cavity_cyl / ldos_bulk_cyl
+    purcell_meep_3d = ldos_cavity_3d / ldos_bulk_3d
 
-    # equation 7 of reference
-    pe_theory = (3*np.fix(cavity_thickness+0.5)/(4*cavity_thickness) +
-                 (4*np.power(np.fix(cavity_thickness+0.5),3) -
-                  np.fix(cavity_thickness+0.5)) /
-                 (16*np.power(cavity_thickness,3)))
+    # Equation 7 of 1998 reference.
+    purcell_theory = 3 * np.fix(cavity_um + 0.5) / (4 * cavity_um) + (
+        4 * np.power(np.fix(cavity_um + 0.5), 3) - np.fix(cavity_um + 0.5)
+    ) / (16 * np.power(cavity_um, 3))
 
     if mp.am_master():
-        plt.plot(cavity_thickness,pe_meep_3D,'b-',label='Meep (3D)')
-        plt.plot(cavity_thickness,pe_meep_cyl,'r-',label='Meep (cylin.)')
-        plt.plot(cavity_thickness,pe_theory,'g-',label='theory')
-        plt.plot(cavity_thickness,np.ones(len(cavity_thickness)),'k--')
-        plt.xlabel('cavity thickness, $nL/\lambda$')
-        plt.ylabel('Purcell enhancement factor')
-        plt.title("parallel point dipole at λ=1.0 μm in a planar cavity\n"
-                  "with n=2.4 and lossless metallic walls")
-        plt.axis([0.5,2.5,0.4,3.1])
-        plt.legend()
-        plt.savefig('cavity_purcell_factor_vs_thickness.png',
-                    bbox_inches='tight')
+        fig, ax = plt.subplots()
+        ax.plot(cavity_um, purcell_meep_3d, "b-", label="Meep (3d)")
+        ax.plot(cavity_um, purcell_meep_cyl, "r-", label="Meep (cylin.)")
+        ax.plot(cavity_um, purcell_theory, "g-", label="theory")
+        ax.plot(cavity_um, np.ones(len(cavity_um)), "k--")
+        ax.set_xlabel("cavity thickness (in media)")
+        ax.set_ylabel("Purcell enhancement factor")
+        ax.set_title(
+            "in-plane dipole at λ=1.0 μm in a planar cavity\n"
+            "with n=2.4 and lossless metallic walls"
+        )
+        ax.axis([0.5, 2.5, 0.4, 3.1])
+        ax.legend()
+        fig.savefig(
+            "cavity_purcell_factor_vs_thickness.png",
+            dpi=150,
+            bbox_inches="tight"
+        )
 ```
 
 Square Box with a Small Opening
@@ -329,45 +326,46 @@ To demonstrate this feature of the LDOS, we will compute the extraction efficien
 
 The simulation setup is shown in the figures below for 3D Cartesian (cross section in $xz$) and cylindrical coordinates. (Note that this single-dipole calculation differs from the somewhat related flux calculation in [Tutorials/Custom Source/Stochastic Dipole Emission in Light Emitting Diodes](Custom_Source.md#stochastic-dipole-emission-in-light-emitting-diodes) which involved modeling a *collection* of dipoles.) In this example, the point-dipole source is positioned at $r=0$ which involves a single simulation. Nonaxisymmetric dipoles positioned at $r>0$, however, are more challenging because they involve multiple simulations. For a demonstration, see [Cylindrical Coordinates/Nonaxisymmetric Dipole Sources](Cylindrical_Coordinates.md#nonaxisymmetric-dipole-sources).
 
+Note: because of a [bug](https://github.com/NanoComp/meep/issues/2704) for an $E_r$ point source at $r = 0$ and $m = \pm 1$ simulation, it is necessary to slightly offset the source to $r = 1.5\Delta r$. This incurs a small error which decreases linearly with resolution.
+
 ![](../images/dipole_extraction_eff_3D.png#center)
 
 ![](../images/dipole_extraction_eff_cyl.png#center)
 
-The total emitted power obtained from the LDOS terms of the formula above must be multiplied by $\Delta V$, the volume of the voxel. In cylindrical coordinates, $\Delta V = \Delta r \times \Delta z \times 2 \pi r$. Meep implements an $r = 0$ source at $r = 0.5 \Delta r$, corresponding to the smallest-$r$ `Er` Yee grid point. This means that for a source at $r = 0$, $\Delta V = \pi / resolution^3$ since $\Delta r = \Delta z = 1 / resolution$. In 3D, $\Delta V = \Delta x \times \Delta y \times \Delta z = 1 / resolution^3$ for every voxel in the cell.
+The total emitted power obtained from the LDOS terms of the formula above must be multiplied by $\Delta V$, the volume of the voxel. In cylindrical coordinates, $\Delta V = \Delta r \times \Delta z \times 2 \pi r$. Meep implements an $r = 0$ source at $r = 0.5 \Delta r$, corresponding to the smallest-$r$ $E_r$ Yee grid point. This means that for a source at $r = 0$, $\Delta V = \pi /$`resolution`$^3$ since $\Delta r = \Delta z = 1 /$`resolution`. In 3D, $\Delta V = \Delta x \times \Delta y \times \Delta z = 1 /$`resolution`$^3$ for every voxel in the cell.
 
 As shown in the figure below, the results from the two coordinate systems have good agreement.
 
 The simulation script is [examples/extraction_eff_ldos.py](https://github.com/NanoComp/meep/blob/master/python/examples/extraction_eff_ldos.py).
 
 ```py
-import numpy as np
-import meep as mp
-import matplotlib
-matplotlib.use('agg')
 import matplotlib.pyplot as plt
+import meep as mp
+import numpy as np
 
 
 resolution = 80  # pixels/μm
-dpml = 0.5       # thickness of PML
-dair = 1.0       # thickness of air padding
-L = 6.0          # length of non-PML region
-n = 2.4          # refractive index of surrounding medium
-wvl = 1.0        # wavelength (in vacuum)
+dpml = 0.5  # thickness of PML
+dair = 1.0  # thickness of air padding
+L = 6.0  # length of non-PML region
+n = 2.4  # refractive index of surrounding medium
+wvl = 1.0  # wavelength (in vacuum)
 
-fcen = 1 / wvl   # center frequency of source/monitor
+fcen = 1 / wvl  # center frequency of source/monitor
 
 # runtime termination criteria
 tol = 1e-8
 
 
 def extraction_eff_cyl(dmat: float, h: float) -> float:
-    """Computes the extraction efficiency of a point dipole embedded
-       within a dielectric layer above a lossless ground plane in
-       cylindrical coordinates.
+    """Computes the extraction efficiency in cylindrical coordinates.
 
-       Args:
-         dmat: thickness of dielectric layer.
-         h: height of dipole above ground plane as fraction of dmat.
+    Args:
+      dmat: thickness of dielectric layer.
+      h: height of dipole above ground plane as fraction of dmat.
+
+    Returns:
+      The extraction efficiency of the dipole within the dielecric layer.
     """
     sr = L + dpml
     sz = dmat + dair + dpml
@@ -379,7 +377,14 @@ def extraction_eff_cyl(dmat: float, h: float) -> float:
     ]
 
     src_cmpt = mp.Er
-    src_pt = mp.Vector3(0, 0, -0.5 * sz + h * dmat)
+
+    # Because (1) Er is not defined at r=0 on the Yee grid, and (2) there
+    # seems to be a bug in the interpolation of an Er point source at r=0,
+    # the source is placed at r=~Δr (just outside the first voxel).
+    # This incurs a small error which decreases linearly with resolution.
+    # Ref: https://github.com/NanoComp/meep/issues/2704
+    src_pt = mp.Vector3(1.5 / resolution, 0, -0.5 * sz + h * dmat)
+
     sources = [
         mp.Source(
             src=mp.GaussianSource(fcen, fwidth=0.1 * fcen),
@@ -422,29 +427,30 @@ def extraction_eff_cyl(dmat: float, h: float) -> float:
 
     sim.run(
         mp.dft_ldos(fcen, 0, 1),
-        until_after_sources=mp.stop_when_fields_decayed(
-            20, src_cmpt, src_pt, tol
-        ),
+        until_after_sources=mp.stop_when_fields_decayed(20, src_cmpt, src_pt, tol),
     )
 
     out_flux = mp.get_fluxes(flux_air)[0]
-    dV = np.pi / (resolution**3)
+    if src_pt.x == 0:
+        dV = np.pi / (resolution**3)
+    else:
+        dV = 2 * np.pi * src_pt.x / (resolution**2)
     total_flux = -np.real(sim.ldos_Fdata[0] * np.conj(sim.ldos_Jdata[0])) * dV
     ext_eff = out_flux / total_flux
-    print(f"extraction efficiency (cyl):, "
-          f"{dmat:.4f}, {h:.4f}, {ext_eff:.6f}")
+    print(f"extraction efficiency (cyl):, " f"{dmat:.4f}, {h:.4f}, {ext_eff:.6f}")
 
     return ext_eff
 
 
 def extraction_eff_3D(dmat: float, h: float) -> float:
-    """Computes the extraction efficiency of a point dipole embedded
-       within a dielectric layer above a lossless ground plane in
-       3D Cartesian coordinates.
+    """Computes the extraction efficiency in 3D Cartesian coordinates.
 
-       Args:
-         dmat: thickness of dielectric layer.
-         h: height of dipole above ground plane as fraction of dmat.
+    Args:
+      dmat: thickness of dielectric layer.
+      h: height of dipole above ground plane as fraction of dmat.
+
+    Returns:
+      The extraction efficiency of the dipole within the dielecric layer.
     """
     sxy = L + 2 * dpml
     sz = dmat + dair + dpml
@@ -452,7 +458,7 @@ def extraction_eff_3D(dmat: float, h: float) -> float:
 
     symmetries = [
         mp.Mirror(direction=mp.X, phase=-1),
-        mp.Mirror(direction=mp.Y)
+        mp.Mirror(direction=mp.Y),
     ]
 
     boundary_layers = [
@@ -497,28 +503,20 @@ def extraction_eff_3D(dmat: float, h: float) -> float:
             size=mp.Vector3(L, L, 0),
         ),
         mp.FluxRegion(
-            center=mp.Vector3(
-                0.5 * L, 0, 0.5 * sz - dpml - 0.5 * dair
-            ),
+            center=mp.Vector3(0.5 * L, 0, 0.5 * sz - dpml - 0.5 * dair),
             size=mp.Vector3(0, L, dair),
         ),
         mp.FluxRegion(
-            center=mp.Vector3(
-                -0.5 * L, 0, 0.5 * sz - dpml - 0.5 * dair
-            ),
+            center=mp.Vector3(-0.5 * L, 0, 0.5 * sz - dpml - 0.5 * dair),
             size=mp.Vector3(0, L, dair),
             weight=-1.0,
         ),
         mp.FluxRegion(
-            center=mp.Vector3(
-                0, 0.5 * L, 0.5 * sz - dpml - 0.5 * dair
-            ),
+            center=mp.Vector3(0, 0.5 * L, 0.5 * sz - dpml - 0.5 * dair),
             size=mp.Vector3(L, 0, dair),
         ),
         mp.FluxRegion(
-            center=mp.Vector3(
-                0, -0.5 * L, 0.5 * sz - dpml - 0.5 * dair
-            ),
+            center=mp.Vector3(0, -0.5 * L, 0.5 * sz - dpml - 0.5 * dair),
             size=mp.Vector3(L, 0, dair),
             weight=-1.0,
         ),
@@ -526,24 +524,21 @@ def extraction_eff_3D(dmat: float, h: float) -> float:
 
     sim.run(
         mp.dft_ldos(fcen, 0, 1),
-        until_after_sources=mp.stop_when_fields_decayed(
-            20, src_cmpt, src_pt, tol
-        ),
+        until_after_sources=mp.stop_when_fields_decayed(20, src_cmpt, src_pt, tol),
     )
 
     out_flux = mp.get_fluxes(flux_air)[0]
     dV = 1 / (resolution**3)
     total_flux = -np.real(sim.ldos_Fdata[0] * np.conj(sim.ldos_Jdata[0])) * dV
     ext_eff = out_flux / total_flux
-    print(f"extraction efficiency (3D):, "
-          f"{dmat:.4f}, {h:.4f}, {ext_eff:.6f}")
+    print(f"extraction efficiency (3D):, {dmat:.4f}, {h:.4f}, {ext_eff:.6f}")
 
     return ext_eff
 
 
 if __name__ == "__main__":
     layer_thickness = 0.7 * wvl / n
-    dipole_height = np.linspace(0.1,0.9,21)
+    dipole_height = np.linspace(0.1, 0.9, 21)
 
     exteff_cyl = np.zeros(len(dipole_height))
     exteff_3D = np.zeros(len(dipole_height))
@@ -551,19 +546,14 @@ if __name__ == "__main__":
         exteff_cyl[j] = extraction_eff_cyl(layer_thickness, dipole_height[j])
         exteff_3D[j] = extraction_eff_3D(layer_thickness, dipole_height[j])
 
-    plt.plot(dipole_height,exteff_cyl,'bo-',label='cylindrical')
-    plt.plot(dipole_height,exteff_3D,'ro-',label='3D Cartesian')
-    plt.xlabel(f"height of dipole above ground plane "
-               f"(fraction of layer thickness)")
+    plt.plot(dipole_height, exteff_cyl, "bo-", label="cylindrical")
+    plt.plot(dipole_height, exteff_3D, "ro-", label="3D Cartesian")
+    plt.xlabel("height of dipole above ground plane (fraction of layer thickness)")
     plt.ylabel("extraction efficiency")
     plt.legend()
 
     if mp.am_master():
-        plt.savefig(
-            'extraction_eff_vs_dipole_height.png',
-            dpi=150,
-            bbox_inches='tight'
-        )
+        plt.savefig("extraction_eff_vs_dipole_height.png", dpi=150, bbox_inches="tight")
 ```
 
 
